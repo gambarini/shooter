@@ -420,6 +420,13 @@ document.addEventListener('pointerlockchange', () => {
 document.addEventListener('pointerlockerror', () => {
   if (state.running && !isTouch) flashTip('CLICK TO LOCK MOUSE', '#ffd27a');
 });
+// requestPointerLock returns a Promise in modern Chrome; a denied request (e.g. the
+// ~1s cooldown right after Esc) rejects — swallow it so it isn't an unhandled error.
+function lockPointer() {
+  if (isTouch) return;
+  const p = canvas.requestPointerLock();
+  if (p && typeof p.catch === 'function') p.catch(() => {});
+}
 document.addEventListener('mousemove', e => {
   if (!pointerLocked) return;
   applyLook(e.movementX, e.movementY);
@@ -711,7 +718,7 @@ const forward = new THREE.Vector3();
 const clock = new THREE.Clock();
 
 // Reused scratch objects — keep the hot loop allocation-free to avoid GC stutter.
-const _tmpA = new THREE.Vector3(), _tmpB = new THREE.Vector3(), _tmpC = new THREE.Vector3();
+const _tmpA = new THREE.Vector3(), _tmpB = new THREE.Vector3();
 const _hitTargets = [];   // rebuilt once per shot instead of once per pellet
 
 function fireWeapon() {
@@ -1208,7 +1215,7 @@ function resumeGame() {
   state.paused = false;
   pauseCard.classList.add('hidden'); overlay.classList.add('hidden');
   clock.getDelta();   // drop the accumulated paused delta
-  if (!isTouch) canvas.requestPointerLock();
+  lockPointer();
 }
 document.getElementById('resumeBtn').addEventListener('click', resumeGame);
 
@@ -1239,7 +1246,7 @@ function startGame() {
   resetGame();
   overlay.classList.add('hidden');
   state.running = true; state.paused = false;
-  if (!isTouch) canvas.requestPointerLock();
+  lockPointer();
   startWave(1);
 }
 function gameOver() {
@@ -1260,7 +1267,7 @@ document.getElementById('againBtn').addEventListener('click', () => {
   overCard.classList.add('hidden'); startCard.classList.remove('hidden'); startGame();
 });
 ui.slots.forEach(s => s.addEventListener('click', () => selectWeapon(+s.dataset.w)));
-canvas.addEventListener('click', () => { if (state.running && !isTouch && !pointerLocked) canvas.requestPointerLock(); });
+canvas.addEventListener('click', () => { if (state.running && !isTouch && !pointerLocked) lockPointer(); });
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
