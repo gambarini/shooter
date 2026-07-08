@@ -799,7 +799,7 @@ function spawnRandomPickup(forceType) {
 // ===========================================================================
 const state = { running: false, paused: false, choosing: false, score: 0, wave: 0, toSpawn: 0, spawnTimer: 0,
                 combo: 1, comboTimer: 0, betweenWaves: 0, pickupTimer: 8, shake: 0, time: 0, slowmo: 0,
-                stats: { shots: 0, hits: 0, crits: 0, kills: 0, bestCombo: 1 } };
+                stats: { shots: 0, hits: 0, crits: 0, kills: 0, bestCombo: 1, style: 0 } };
 
 function startWave(n) {
   state.wave = n;
@@ -957,7 +957,7 @@ function fireWeapon() {
         // it's a crit when the same ray also passes through that enemy's core.
         const crit = hits.some(h => h.object === enemy.core);
         state.stats.hits++;
-        damageEnemy(enemy, w.damage * mods.damage * (crit ? mods.crit : 1), hit.point, crit);
+        damageEnemy(enemy, w.damage * mods.damage * (crit ? mods.crit : 1), hit.point, crit, w, hit.distance);
       }
       else burst(hit.point, 0x66ccff, 4, 8);
     }
@@ -965,17 +965,19 @@ function fireWeapon() {
   }
 }
 
-function damageEnemy(enemy, dmg, point, crit) {
+// kw/kdist: killing weapon + hit distance for direct hitscan hits; null for
+// splash/chain damage (those kills never earn style bonuses).
+function damageEnemy(enemy, dmg, point, crit, kw, kdist) {
   enemy.hp -= dmg; enemy.damageTimer = 0.12;
   spawnDamageNumber(point || enemy.mesh.position, dmg, crit);
   showHitmark(crit);
   if (crit) { sfx.crit(); state.stats.crits++; if (point) burst(point, 0xffe23a, 10, 14); }
   else sfx.hit();
   if (point) burst(point, enemy.color, 6, 10);
-  if (enemy.hp <= 0) killEnemy(enemy);
+  if (enemy.hp <= 0) killEnemy(enemy, kw, kdist);
 }
 const STREAKS = { 5: '⚡ RAMPAGE', 8: '🔥 UNSTOPPABLE', 12: '💀 GODLIKE' };
-function killEnemy(enemy) {
+function killEnemy(enemy, kw, kdist) {
   const isBoss = enemy.type === 'boss';
   burst(enemy.mesh.position, enemy.color, isBoss ? 60 : 26, isBoss ? 28 : 20, isBoss ? 0.32 : 0.22);
   disposeEnemy(enemy);
@@ -985,7 +987,21 @@ function killEnemy(enemy) {
   state.stats.kills++;
   state.stats.bestCombo = Math.max(state.stats.bestCombo, state.combo);
   if (mods.lifesteal > 0) { player.hp = Math.min(player.maxHp, player.hp + mods.lifesteal); updateHealthUI(); }
-  const gained = (isBoss ? 1000 : 100) * state.combo; state.score += gained; updateScoreUI();
+  const gained = (isBoss ? 1000 : 100) * state.combo; state.score += gained;
+  // Style bonuses — flat additions, only on direct player hits (kw is null for splash/chain).
+  if (kw) {
+    const styles = [];
+    if (!player.onGround) styles.push(['AIRSHOT', 150]);
+    if (player.invuln > 0) styles.push(['PHASE KILL', 200]);
+    if (kw.name === 'SHOTGUN' && kdist < 4) styles.push(['POINT BLANK', 100]);
+    if (styles.length) {
+      let bonus = 0;
+      for (const s of styles) bonus += s[1];
+      state.score += bonus; state.stats.style += bonus;
+      flashTip(styles.map(s => `${s[0]} +${s[1]}`).join('   '), '#ffe23a');
+    }
+  }
+  updateScoreUI();
   if (isBoss) flashCombo(`BOSS DOWN  +${gained}`, '#ff2e88');
   else if (STREAKS[state.combo]) flashCombo(`${STREAKS[state.combo]}  +${gained}`, '#ff8f3a');
   else if (state.combo > 1) flashCombo(`COMBO x${state.combo}  +${gained}`, '#ffd27a');
@@ -1579,7 +1595,7 @@ function resetGame() {
   state.score = 0; state.wave = 0; state.combo = 1; state.comboTimer = 0;
   state.toSpawn = 0; state.betweenWaves = 0; state.pickupTimer = 8; state.shake = 0;
   state.time = 0; state.slowmo = 0; state.choosing = false;
-  state.stats = { shots: 0, hits: 0, crits: 0, kills: 0, bestCombo: 1 };
+  state.stats = { shots: 0, hits: 0, crits: 0, kills: 0, bestCombo: 1, style: 0 };
   lowHp = false; heartbeatT = 0; ui.lowhp.style.opacity = 0;
   updateScoreUI(); updateHealthUI(); updateWeaponUI();
 }
@@ -1603,7 +1619,8 @@ function gameOver() {
     `<div class="stat"><b>${st.kills}</b>KILLS</div>` +
     `<div class="stat"><b>${acc}%</b>ACCURACY</div>` +
     `<div class="stat"><b>${st.crits}</b>CRITS</div>` +
-    `<div class="stat"><b>x${st.bestCombo}</b>BEST COMBO</div>`;
+    `<div class="stat"><b>x${st.bestCombo}</b>BEST COMBO</div>` +
+    `<div class="stat"><b>${st.style}</b>STYLE PTS</div>`;
   const isNewBest = state.score > bestScore;
   if (isNewBest) { bestScore = state.score; try { localStorage.setItem(BEST_KEY, bestScore); } catch {} renderBest(); }
   document.getElementById('finalScore').textContent = state.score;

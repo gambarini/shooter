@@ -11,7 +11,7 @@ close out with a Session Log entry at the bottom of this file.
 | 1  | Floating damage numbers       | 1     | done   | f85aa5f |
 | 2  | Combo-pitched kill audio      | 1     | done   | 7d30b3f |
 | 3  | Low-HP danger state           | 1     | done   | a3a4b4b |
-| 4  | Style-bonus scoring           | 1     | todo   |        |
+| 4  | Style-bonus scoring           | 1     | done   |        |
 | 5  | Ultimate ability (NOVA)       | 1     | todo   |        |
 | 6  | Upgrade rarity + reroll       | 2     | todo   |        |
 | 7  | Ricochet rounds               | 2     | todo   | needs 6 |
@@ -84,7 +84,7 @@ Item 16 (elite modifiers) benefits from 12–14 (more enemy types to modify) but
 **Sketch:** Add a fixed-position CSS vignette div (radial-gradient, red edges, `pointer-events:none`) with opacity driven from `update` (`0.35 + 0.2 * sin(t*5)` while low). Heartbeat = two short low `beep`s (~55 Hz sine pair) on a ~1 s timer in `update`, only while low. Both stop instantly on heal above threshold, on death, and on restart.
 **Done when:** entering/leaving low HP toggles cleanly (including via NANO LEECH heals and PLATED ARMOR raising maxHp), no vignette on the death/start screens, resets on new run.
 
-### [ ] 4. Style-bonus scoring
+### [x] 4. Style-bonus scoring
 **Goal:** Flashy play pays: bonus score + callout for skilled kills.
 **Hook points:** `killEnemy` (score is computed there), `player.onGround`, `player.invuln` (>0 during dash window), weapon + distance at kill time.
 **Sketch:** In `killEnemy`, detect: **AIRSHOT** (player not onGround, +150), **PHASE KILL** (killed while dash i-frames active, +200), **POINT BLANK** (shotgun kill < 4 units, +100). Requires passing the killing weapon/distance from `damageEnemy` → `killEnemy` (add optional params, default null for splash/chain kills). Show via `flashTip` (keep `flashCombo` for combo/streaks so they don't fight). Add bonuses to score *before* combo multiplication or as flat additions — flat is simpler and easier to tune.
@@ -231,6 +231,27 @@ Append one entry per completed (or abandoned) session, newest first. Format:
 ```
 
 If an item is left `wip`, the entry MUST say exactly what remains and where the work stopped.
+
+### 2026-07-08 — Item 4: Style-bonus scoring — done
+- What landed: `damageEnemy`/`killEnemy` gained optional `kw`/`kdist` params (killing weapon +
+  hit distance), passed only from the hitscan branch of `fireWeapon`; in `killEnemy`, when `kw`
+  is set: AIRSHOT +150 (`!player.onGround`), PHASE KILL +200 (`player.invuln > 0` — only dash
+  sets invuln, so it's a clean signal), POINT BLANK +100 (`kw.name === 'SHOTGUN' && kdist < 4`).
+  Flat additions after the combo-multiplied score; callout via `flashTip` in crit-yellow
+  `#ffe23a` (flashCombo stays reserved for combo/streak text). `state.stats.style` tallies
+  bonuses and shows as a fifth STYLE PTS stat on the death screen.
+- Tuning chosen: bonuses stack on one kill (all three = +450, tips joined with spaces); rocket
+  splash and exploder-chain kills pass `kw = null` so they never earn bonuses (rockets have no
+  direct-hit path — documented limitation, all rocket kills are splash).
+- Notes for next sessions: verified via headless-Chrome playtest (same scratch-copy +
+  `window.__dbg` technique): all 3 bonuses + stacking + negative cases (splash kill, far
+  shotgun, close blaster) exact to the point, real `fireWeapon` shot carries kw/dist, stats
+  reset on restart, death screen renders 5 stats fine, 3 waves + die + restart + 1 wave clean
+  (46 FPS under swiftshader software GL — normal for headless). Gotcha for test writers: combo
+  increments *before* score is computed in `killEnemy`, so a kill at combo N scores
+  `100 × (N+1)`. Item 10 (dash trail) should award PHASE KILL only via the kw path if trail
+  kills are meant to qualify — trail kills won't pass kw, so spec item 10's "counts for PHASE
+  KILL" will need a deliberate hook. No new controls, so no touch work needed.
 
 ### 2026-07-08 — Item 3: Low-HP danger state — done
 - What landed: `#lowhp` fixed vignette div (red radial-gradient, z-index 6 like `#damageflash`);
