@@ -11,7 +11,7 @@ close out with a Session Log entry at the bottom of this file.
 | 1  | Floating damage numbers       | 1     | done   | f85aa5f |
 | 2  | Combo-pitched kill audio      | 1     | done   | 7d30b3f |
 | 3  | Low-HP danger state           | 1     | done   | a3a4b4b |
-| 4  | Style-bonus scoring           | 1     | done   |        |
+| 4  | Style-bonus scoring           | 1     | done   | d0e3cd9 |
 | 5  | Ultimate ability (NOVA)       | 1     | todo   |        |
 | 6  | Upgrade rarity + reroll       | 2     | todo   |        |
 | 7  | Ricochet rounds               | 2     | todo   | needs 6 |
