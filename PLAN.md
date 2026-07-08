@@ -1,7 +1,36 @@
 # NEON STRIKE — Feature Roadmap
 
 Each item below is self-contained and sized to be completed in one focused session.
-Pick an item, mark it `[~]` (in progress) at the start of the session and `[x]` when done.
+Workflow: see CLAUDE.md ("Roadmap workflow") — one item per session, one commit per item,
+close out with a Session Log entry at the bottom of this file.
+
+## Status board
+
+| #  | Item                          | Phase | Status | Commit |
+|----|-------------------------------|-------|--------|--------|
+| 1  | Floating damage numbers       | 1     | todo   |        |
+| 2  | Combo-pitched kill audio      | 1     | todo   |        |
+| 3  | Low-HP danger state           | 1     | todo   |        |
+| 4  | Style-bonus scoring           | 1     | todo   |        |
+| 5  | Ultimate ability (NOVA)       | 1     | todo   |        |
+| 6  | Upgrade rarity + reroll       | 2     | todo   |        |
+| 7  | Ricochet rounds               | 2     | todo   | needs 6 |
+| 8  | Chain lightning on crit       | 2     | todo   | needs 6 |
+| 9  | Kill clip                     | 2     | todo   | needs 6 |
+| 10 | Dash trail damage             | 2     | todo   | needs 6 |
+| 11 | Volatile deaths               | 2     | todo   | needs 6 |
+| 12 | Flying enemy — WASP           | 3     | todo   |        |
+| 13 | Shielded tank — BULWARK       | 3     | todo   |        |
+| 14 | Splitter enemy                | 3     | todo   |        |
+| 15 | Boss phases                   | 3     | todo   |        |
+| 16 | Elite enemy modifiers         | 3     | todo   |        |
+| 17 | Arena hazard — laser sweep    | 4     | todo   |        |
+| 18 | Exploding barrels             | 4     | todo   |        |
+| 19 | Challenge waves (mutators)    | 4     | todo   |        |
+| 20 | Death recap & run summary     | 4     | todo   |        |
+
+Status values: `todo` → `wip` → `done` (fill Commit with the short hash on completion).
+Keep this table AND the item checkbox in sync.
 
 The whole game lives in `index.html` (single file: CSS → HUD markup → one `<script type="module">` with three.js from CDN). No build step; test by opening the file in a browser (`open index.html`) or `python3 -m http.server`.
 
@@ -187,3 +216,20 @@ Banner via `flashCombo` with distinct color + `sfx.wave` variant. Revert everyth
 - New enemy types: add to minimap colors, verify `disposeEnemy` covers their children, and confirm they respect `collideArena` (or deliberately don't, like WASP).
 - New upgrades: add to `UPGRADES` with rarity (post-item-6), verify they reset via `baseMods()`.
 - Touch: any new ability/key needs a touch button (see `#touch` block) or an explicit note that it's keyboard-only.
+
+---
+
+## Session Log
+
+Append one entry per completed (or abandoned) session, newest first. Format:
+
+```
+### YYYY-MM-DD — Item N: <name> — <done|partial|abandoned>
+- What landed: <1–3 lines>
+- Tuning chosen: <values that differ from or refine the spec>
+- Notes for next sessions: <gotchas found, out-of-scope bugs spotted, spec corrections>
+```
+
+If an item is left `wip`, the entry MUST say exactly what remains and where the work stopped.
+
+_(no entries yet — roadmap created 2026-07-08, baseline commits 9564c25 + 4c4df3f)_
