@@ -123,6 +123,8 @@
   .final { font-size:18px; color:#9fe9ff; margin: 10px 0 22px; }
   .final b { color:#fff; font-size:42px; display:block; }
   #damageflash { position:fixed; inset:0; z-index:6; pointer-events:none; background:#ff2e88; opacity:0; }
+  #lowhp { position:fixed; inset:0; z-index:6; pointer-events:none; opacity:0;
+    background:radial-gradient(ellipse at center, transparent 40%, rgba(255,20,50,0.28) 72%, rgba(255,10,40,0.6) 100%); }
   #hitmark { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%) rotate(45deg);
              font-size:22px; color:#fff; opacity:0; }
 
@@ -210,6 +212,7 @@
 </div>
 
 <div id="damageflash"></div>
+<div id="lowhp"></div>
 
 <div id="upgrade" class="hidden">
   <h2>WAVE CLEAR — CHOOSE UPGRADE</h2>
@@ -385,15 +388,16 @@ function initAudio() {
   masterGain.connect(audioCtx.destination);
 }
 function setVolume(v) { settings.volume = v; if (masterGain) masterGain.gain.value = v / 100; }
-function beep({ freq = 440, type = 'square', dur = 0.08, vol = 0.15, slideTo = null }) {
+function beep({ freq = 440, type = 'square', dur = 0.08, vol = 0.15, slideTo = null, delay = 0 }) {
   if (!audioCtx || settings.volume <= 0) return;
+  const t0 = audioCtx.currentTime + delay;
   const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-  o.type = type; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
-  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + dur);
-  g.gain.setValueAtTime(vol, audioCtx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+  o.type = type; o.frequency.setValueAtTime(freq, t0);
+  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t0 + dur);
+  g.gain.setValueAtTime(vol, t0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
   o.connect(g); g.connect(masterGain);
-  o.start(); o.stop(audioCtx.currentTime + dur);
+  o.start(t0); o.stop(t0 + dur);
 }
 function noiseBurst(dur = 0.18, vol = 0.25) {
   if (!audioCtx || settings.volume <= 0) return;
@@ -423,6 +427,8 @@ const sfx = {
   dash:  () => beep({ freq: 220, slideTo: 900, type: 'sine', dur: 0.14, vol: 0.1 }),
   crit:  () => beep({ freq: 880, slideTo: 1500, type: 'square', dur: 0.07, vol: 0.1 }),
   warn:  () => beep({ freq: 1100, type: 'square', dur: 0.06, vol: 0.12 }),
+  heartbeat: () => { beep({ freq: 55, type: 'sine', dur: 0.14, vol: 0.45 });
+                     beep({ freq: 50, type: 'sine', dur: 0.12, vol: 0.32, delay: 0.16 }); },
 };
 
 // ===========================================================================
@@ -822,6 +828,7 @@ const ui = {
   weaponName: document.getElementById('weaponname'),
   combo: document.getElementById('combo'),
   flash: document.getElementById('damageflash'),
+  lowhp: document.getElementById('lowhp'),
   hitmark: document.getElementById('hitmark'),
   pickuptip: document.getElementById('pickuptip'),
   slots: Array.from(document.querySelectorAll('.wslot')),
@@ -831,7 +838,16 @@ const ui = {
   bossFill: document.getElementById('bossfill'),
 };
 function updateScoreUI() { ui.score.textContent = state.score; }
-function updateHealthUI() { ui.health.style.width = Math.max(0, player.hp / player.maxHp * 100) + '%'; }
+let lowHp = false, heartbeatT = 0;
+function updateHealthUI() {
+  ui.health.style.width = Math.max(0, player.hp / player.maxHp * 100) + '%';
+  const low = player.hp > 0 && player.hp <= player.maxHp * 0.25;
+  if (low !== lowHp) {
+    lowHp = low;
+    if (low) heartbeatT = 0;                 // first beat lands immediately on entry
+    else ui.lowhp.style.opacity = 0;         // stop instantly on heal / death / reset
+  }
+}
 function updateAmmoUI() {
   if (reloading) return;
   const w = W();
@@ -1332,6 +1348,12 @@ function update(dt) {
   pink.intensity = 0.7 + Math.sin(t * 2) * 0.2;
   cyan.intensity = 0.7 + Math.cos(t * 2.3) * 0.2;
 
+  if (lowHp) {
+    ui.lowhp.style.opacity = 0.35 + 0.2 * Math.sin(t * 5);
+    heartbeatT -= dt;
+    if (heartbeatT <= 0) { sfx.heartbeat(); heartbeatT = 1.0; }
+  }
+
   drawMinimap();
 }
 
@@ -1558,6 +1580,7 @@ function resetGame() {
   state.toSpawn = 0; state.betweenWaves = 0; state.pickupTimer = 8; state.shake = 0;
   state.time = 0; state.slowmo = 0; state.choosing = false;
   state.stats = { shots: 0, hits: 0, crits: 0, kills: 0, bestCombo: 1 };
+  lowHp = false; heartbeatT = 0; ui.lowhp.style.opacity = 0;
   updateScoreUI(); updateHealthUI(); updateWeaponUI();
 }
 

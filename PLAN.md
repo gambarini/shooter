@@ -10,7 +10,7 @@ close out with a Session Log entry at the bottom of this file.
 |----|-------------------------------|-------|--------|--------|
 | 1  | Floating damage numbers       | 1     | done   | f85aa5f |
 | 2  | Combo-pitched kill audio      | 1     | done   | 7d30b3f |
-| 3  | Low-HP danger state           | 1     | todo   |        |
+| 3  | Low-HP danger state           | 1     | done   |        |
 | 4  | Style-bonus scoring           | 1     | todo   |        |
 | 5  | Ultimate ability (NOVA)       | 1     | todo   |        |
 | 6  | Upgrade rarity + reroll       | 2     | todo   |        |
@@ -78,7 +78,7 @@ Item 16 (elite modifiers) benefits from 12–14 (more enemy types to modify) but
 **Sketch:** Change `sfx.kill` to accept a multiplier: `sfx.kill(1 + Math.min(state.combo, 12) * 0.06)` scaling both `freq` and `slideTo`. Cap so x99 combos don't become dog whistles.
 **Done when:** consecutive fast kills audibly climb; single kills sound unchanged.
 
-### [ ] 3. Low-HP danger state
+### [x] 3. Low-HP danger state
 **Goal:** Below 25% HP the game *feels* dangerous: pulsing red vignette + heartbeat sound.
 **Hook points:** `updateHealthUI` (state entry/exit), `update` (pulse animation), `damagePlayer`, `collectPickup`/lifesteal (may exit the state).
 **Sketch:** Add a fixed-position CSS vignette div (radial-gradient, red edges, `pointer-events:none`) with opacity driven from `update` (`0.35 + 0.2 * sin(t*5)` while low). Heartbeat = two short low `beep`s (~55 Hz sine pair) on a ~1 s timer in `update`, only while low. Both stop instantly on heal above threshold, on death, and on restart.
@@ -231,6 +231,23 @@ Append one entry per completed (or abandoned) session, newest first. Format:
 ```
 
 If an item is left `wip`, the entry MUST say exactly what remains and where the work stopped.
+
+### 2026-07-08 — Item 3: Low-HP danger state — done
+- What landed: `#lowhp` fixed vignette div (red radial-gradient, z-index 6 like `#damageflash`);
+  entry/exit detected centrally in `updateHealthUI` (`hp > 0 && hp <= maxHp * 0.25`, so every
+  heal/damage/maxHp path is covered); pulse `0.35 + 0.2*sin(t*5)` driven from `update`;
+  `sfx.heartbeat` = 55 Hz + 50 Hz sine pair 0.16 s apart on a 1 s timer. `beep()` gained an
+  optional `delay` param (schedules on `audioCtx.currentTime + delay`) for the second beat.
+- Tuning chosen: exit path zeroes opacity immediately (heal, death — hp hits 0 before
+  `gameOver`, so the death screen is clean — and reset); `heartbeatT = 0` on entry so the first
+  beat lands instantly. Vignette freezes (doesn't hide) under the pause/upgrade overlays —
+  update() is gated there; overlays sit at z-index 10 above it, looks fine.
+- Notes for next sessions: verified via headless-Chrome playtest (puppeteer-core + scratch copy
+  with `window.__dbg`, as items 1–2): pulse samples 0.15–0.55, 2 beats/2.1 s, instant stop on
+  heal, enters via PLATED-ARMOR-style maxHp change (30/125), clean death screen, clean across
+  restart; 3 waves + die + restart + 1 wave, no console errors (favicon 404 only). No new
+  controls, so no touch work needed. `beep({delay})` is now available for any multi-note SFX
+  (e.g. item 5's nova).
 
 ### 2026-07-08 — Item 2: Combo-pitched kill audio — done
 - What landed: `sfx.kill` now takes a pitch multiplier (default 1) applied to both `freq` and
