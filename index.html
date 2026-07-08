@@ -412,7 +412,7 @@ const sfx = {
   rocket:  () => { beep({ freq: 160, slideTo: 60, type: 'square', dur: 0.22, vol: 0.16 }); noiseBurst(0.1, 0.12); },
   explode: () => { beep({ freq: 120, slideTo: 40, type: 'sawtooth', dur: 0.3, vol: 0.2 }); noiseBurst(0.35, 0.28); },
   hit:   () => beep({ freq: 320, slideTo: 120, type: 'square', dur: 0.06, vol: 0.09 }),
-  kill:  () => { beep({ freq: 200, slideTo: 600, type: 'square', dur: 0.12, vol: 0.15 }); noiseBurst(0.15, 0.16); },
+  kill:  (m = 1) => { beep({ freq: 200 * m, slideTo: 600 * m, type: 'square', dur: 0.12, vol: 0.15 }); noiseBurst(0.15, 0.16); },
   hurt:  () => beep({ freq: 160, slideTo: 60, type: 'sawtooth', dur: 0.2, vol: 0.18 }),
   reload:() => beep({ freq: 300, slideTo: 520, type: 'triangle', dur: 0.18, vol: 0.12 }),
   wave:  () => beep({ freq: 440, slideTo: 880, type: 'triangle', dur: 0.3, vol: 0.14 }),
@@ -964,7 +964,7 @@ function killEnemy(enemy) {
   burst(enemy.mesh.position, enemy.color, isBoss ? 60 : 26, isBoss ? 28 : 20, isBoss ? 0.32 : 0.22);
   disposeEnemy(enemy);
   const idx = enemies.indexOf(enemy); if (idx >= 0) enemies.splice(idx, 1);
-  sfx.kill(); if (isBoss) { sfx.explode(); state.shake = Math.min(0.8, state.shake + 0.6); state.slowmo = 0.9; }
+  sfx.kill(1 + Math.min(state.combo - 1, 12) * 0.06); if (isBoss) { sfx.explode(); state.shake = Math.min(0.8, state.shake + 0.6); state.slowmo = 0.9; }
   state.comboTimer = 3.0; state.combo = Math.min(state.combo + 1, 99);
   state.stats.kills++;
   state.stats.bestCombo = Math.max(state.stats.bestCombo, state.combo);

@@ -9,7 +9,7 @@ close out with a Session Log entry at the bottom of this file.
 | #  | Item                          | Phase | Status | Commit |
 |----|-------------------------------|-------|--------|--------|
 | 1  | Floating damage numbers       | 1     | done   | f85aa5f |
-| 2  | Combo-pitched kill audio      | 1     | todo   |        |
+| 2  | Combo-pitched kill audio      | 1     | done   |        |
 | 3  | Low-HP danger state           | 1     | todo   |        |
 | 4  | Style-bonus scoring           | 1     | todo   |        |
 | 5  | Ultimate ability (NOVA)       | 1     | todo   |        |
@@ -72,7 +72,7 @@ Item 16 (elite modifiers) benefits from 12–14 (more enemy types to modify) but
 **Sketch:** Pooled `THREE.Sprite`s with a shared canvas-texture-per-instance (or one small canvas redrawn per acquire). Pool of ~40. White for normal, yellow + larger for crits. Rise ~1.5 units over 0.6 s, fade out. Update/expire them in `update` alongside particles; recycle in `resetGame`.
 **Done when:** numbers appear on every hitscan/rocket/chain hit, crits visibly distinct, no FPS drop with shotgun spam (9 pellets/shot), pool never leaks across restarts.
 
-### [ ] 2. Combo-pitched kill audio
+### [x] 2. Combo-pitched kill audio
 **Goal:** Kill sound rises in pitch with the current combo so streaks are audible.
 **Hook points:** `sfx.kill` call inside `killEnemy`; `beep()` already takes `freq`/`slideTo`.
 **Sketch:** Change `sfx.kill` to accept a multiplier: `sfx.kill(1 + Math.min(state.combo, 12) * 0.06)` scaling both `freq` and `slideTo`. Cap so x99 combos don't become dog whistles.
@@ -231,6 +231,18 @@ Append one entry per completed (or abandoned) session, newest first. Format:
 ```
 
 If an item is left `wip`, the entry MUST say exactly what remains and where the work stopped.
+
+### 2026-07-08 — Item 2: Combo-pitched kill audio — done
+- What landed: `sfx.kill` now takes a pitch multiplier (default 1) applied to both `freq` and
+  `slideTo`; `killEnemy` passes `1 + Math.min(state.combo - 1, 12) * 0.06`.
+- Tuning chosen: `state.combo - 1` (not `state.combo` as the spec sketched) because `sfx.kill`
+  fires *before* the combo increment and combo idles at 1 — this keeps single kills at exactly
+  1.0×. Cap at 12 steps → max 1.72× (200→344 Hz base, slide to 1032 Hz).
+- Notes for next sessions: verified via headless-Chrome playtest (puppeteer-core driving the
+  installed Chrome — scratch copy + `window.__dbg` injection as in item 1): multipliers climb
+  1.00→1.72 in 0.06 steps over a 16-kill streak, snap back to 1.00 after the 3 s combo window,
+  reset to 1.00 on restart; 3 waves + restart + 1 wave clean, no console errors (only the
+  pre-existing favicon 404). No new controls, so no touch work needed.
 
 ### 2026-07-08 — Item 1: Floating damage numbers — done
 - What landed: pooled `THREE.Sprite` damage numbers (one 128×64 canvas per sprite, redrawn on
