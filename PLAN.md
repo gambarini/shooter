@@ -9,7 +9,7 @@ close out with a Session Log entry at the bottom of this file.
 | #  | Item                          | Phase | Status | Commit |
 |----|-------------------------------|-------|--------|--------|
 | 1  | Floating damage numbers       | 1     | done   | f85aa5f |
-| 2  | Combo-pitched kill audio      | 1     | done   |        |
+| 2  | Combo-pitched kill audio      | 1     | done   | 7d30b3f |
 | 3  | Low-HP danger state           | 1     | todo   |        |
 | 4  | Style-bonus scoring           | 1     | todo   |        |
 | 5  | Ultimate ability (NOVA)       | 1     | todo   |        |
