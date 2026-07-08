@@ -8,7 +8,7 @@ close out with a Session Log entry at the bottom of this file.
 
 | #  | Item                          | Phase | Status | Commit |
 |----|-------------------------------|-------|--------|--------|
-| 1  | Floating damage numbers       | 1     | todo   |        |
+| 1  | Floating damage numbers       | 1     | done   | 3110c0f |
 | 2  | Combo-pitched kill audio      | 1     | todo   |        |
 | 3  | Low-HP danger state           | 1     | todo   |        |
 | 4  | Style-bonus scoring           | 1     | todo   |        |
@@ -66,7 +66,7 @@ Item 16 (elite modifiers) benefits from 12–14 (more enemy types to modify) but
 
 ## Phase 1 — Game feel / juice
 
-### [ ] 1. Floating damage numbers
+### [x] 1. Floating damage numbers
 **Goal:** Every hit shows a small floating number at the impact point that drifts up and fades.
 **Hook points:** `damageEnemy` (has `point` + `crit`), `explodeRocket` and exploder chain damage pass `point=null` — for those, use the enemy's mesh position.
 **Sketch:** Pooled `THREE.Sprite`s with a shared canvas-texture-per-instance (or one small canvas redrawn per acquire). Pool of ~40. White for normal, yellow + larger for crits. Rise ~1.5 units over 0.6 s, fade out. Update/expire them in `update` alongside particles; recycle in `resetGame`.
@@ -232,4 +232,18 @@ Append one entry per completed (or abandoned) session, newest first. Format:
 
 If an item is left `wip`, the entry MUST say exactly what remains and where the work stopped.
 
-_(no entries yet — roadmap created 2026-07-08, baseline commits 9564c25 + 4c4df3f)_
+### 2026-07-08 — Item 1: Floating damage numbers — done
+- What landed: pooled `THREE.Sprite` damage numbers (one 128×64 canvas per sprite, redrawn on
+  acquire) spawned from `damageEnemy`; white for normal hits, yellow + larger for crits; rise
+  2.5 u/s and fade over 0.6 s; expired in `update` next to particles, recycled in `resetGame`.
+- Tuning chosen: scale 1.8×0.9 world units (crit 2.6×1.3), +0.3 y offset and ±0.4 xz jitter so
+  shotgun pellets don't stack; splash/chain hits (`point=null`) fall back to the enemy mesh
+  position via `point || enemy.mesh.position`.
+- Notes for next sessions: verified via headless-Chrome playtest in touch mode (user's screen
+  was occupied) — 60 FPS sustained at 270 spawns/s (162 concurrent sprites); pool recycles
+  cleanly across restarts (52 active → 0 active / 52 pooled after reset). Useful technique: copy
+  index.html to a scratch dir, append `window.__dbg = {…}` inside the module script, serve on
+  another port — gives test access to module internals without touching the repo file. No new
+  controls, so no touch-button work needed.
+
+_(roadmap created 2026-07-08, baseline commits 9564c25 + 4c4df3f)_
