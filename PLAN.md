@@ -15,7 +15,7 @@ close out with a Session Log entry at the bottom of this file.
 | 5  | Ultimate ability (NOVA)       | 1     | done   | 707af5a |
 | 6  | Upgrade rarity + reroll       | 2     | done   | 0df5187 |
 | 7  | Ricochet rounds               | 2     | done   | aa0f610 |
-| 8  | Chain lightning on crit       | 2     | done   |        |
+| 8  | Chain lightning on crit       | 2     | done   | b1e5ecd |
 | 9  | Kill clip                     | 2     | todo   | needs 6 |
 | 10 | Dash trail damage             | 2     | todo   | needs 6 |
 | 11 | Volatile deaths               | 2     | todo   | needs 6 |
