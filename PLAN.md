@@ -12,7 +12,7 @@ close out with a Session Log entry at the bottom of this file.
 | 2  | Combo-pitched kill audio      | 1     | done   | 7d30b3f |
 | 3  | Low-HP danger state           | 1     | done   | a3a4b4b |
 | 4  | Style-bonus scoring           | 1     | done   | d0e3cd9 |
-| 5  | Ultimate ability (NOVA)       | 1     | todo   |        |
+| 5  | Ultimate ability (NOVA)       | 1     | done   |        |
 | 6  | Upgrade rarity + reroll       | 2     | todo   |        |
 | 7  | Ricochet rounds               | 2     | todo   | needs 6 |
 | 8  | Chain lightning on crit       | 2     | todo   | needs 6 |
@@ -90,7 +90,7 @@ Item 16 (elite modifiers) benefits from 12–14 (more enemy types to modify) but
 **Sketch:** In `killEnemy`, detect: **AIRSHOT** (player not onGround, +150), **PHASE KILL** (killed while dash i-frames active, +200), **POINT BLANK** (shotgun kill < 4 units, +100). Requires passing the killing weapon/distance from `damageEnemy` → `killEnemy` (add optional params, default null for splash/chain kills). Show via `flashTip` (keep `flashCombo` for combo/streaks so they don't fight). Add bonuses to score *before* combo multiplication or as flat additions — flat is simpler and easier to tune.
 **Done when:** each bonus triggers correctly and only for player-attributed kills (not exploder chains), callouts readable, death-screen stats optionally count style bonuses.
 
-### [ ] 5. Ultimate ability (NOVA)
+### [x] 5. Ultimate ability (NOVA)
 **Goal:** A kill-charged ultimate on `E` / touch button: screen-clearing shockwave + brief slow-mo.
 **Hook points:** keydown handler, `killEnemy` (charge), `update` (expanding wave), `state.slowmo` (already implemented in `animate`), HUD next to dash bar, touch controls block, `resetGame`.
 **Sketch:** `state.ult` 0→100, +8 per kill (+25 per boss). At 100 the HUD bar glows. On activate: expanding emissive ring/sphere from player over ~0.5 s; enemies inside the radius take heavy damage (300, bosses take 150); `state.slowmo = 0.6`; big shake + new `sfx.nova` (low sweep + noise burst). New `.tbtn` for touch, placed near dash.
@@ -232,7 +232,27 @@ Append one entry per completed (or abandoned) session, newest first. Format:
 
 If an item is left `wip`, the entry MUST say exactly what remains and where the work stopped.
 
-### 2026-07-08 — Item 4: Style-bonus scoring — done
+### 2026-07-09 — Item 5: Ultimate ability (NOVA) — done
+- What landed: `state.ult` 0–100 (+8/kill, +25/boss, tallied in `killEnemy`); `E` key (or new
+  NOVA touch button above DASH) sets `wantUlt`, consumed in `update` — so pause/choosing gates
+  come free. `activateNova()`: 300 dmg (150 to bosses) to all enemies within 18 units (2D dist),
+  `state.slowmo = 0.6`, shake +0.6, `flashCombo('◎ NOVA')`. Visual = persistent hidden torus
+  ring (pink) + transparent sphere shell (cyan, DoubleSide) + point light, scaled 0→18 over
+  0.5 s in `update`, then re-hidden — nothing to pool. HUD `#ultwrap` bar mirrors dash-bar
+  styling in pink; at 100 it gets `.ready` (pulsing glow + gold gradient) plus `sfx.novaReady`
+  chime and a flashTip. `sfx.nova` = saw sweep 900→45 Hz + 70 Hz sine sub + noise burst.
+- Tuning chosen: nova kills do NOT recharge the meter (`novaBlasting` flag checked in
+  `killEnemy`) — spec didn't say, but +8 per nova kill refunded ~half the meter on a good blast.
+  Damage applied instantly at activation; the 0.5 s wave is cosmetic. `E` pressed uncharged
+  plays `sfx.empty`. Keydown gate `state.running && !state.paused` prevents a buffered E while
+  paused from firing on resume.
+- Notes for next sessions: verified via headless-Chrome playtest (24 checks: charge rates, HUD,
+  gating, radius/boss damage, no self-recharge, persistence across waves, reset, 3 waves + die +
+  restart + 1 wave, screenshots of ready bar + mid-blast). Harness gotchas: new Chrome needs
+  `--use-angle=swiftshader --enable-unsafe-swiftshader` (old `--use-gl=swiftshader` now fails to
+  create a WebGL context), and headless pointer-lock exit events async-re-pause the game — tests
+  must clear `state.paused` after any pause/resume or overlay interaction. Boss-kill slowmo (0.9)
+  can overwrite nova's 0.6 if the blast kills a boss — harmless, reads as more drama.
 - What landed: `damageEnemy`/`killEnemy` gained optional `kw`/`kdist` params (killing weapon +
   hit distance), passed only from the hitscan branch of `fireWeapon`; in `killEnemy`, when `kw`
   is set: AIRSHOT +150 (`!player.onGround`), PHASE KILL +200 (`player.invuln > 0` — only dash
