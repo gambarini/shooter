@@ -15,7 +15,7 @@ close out with a Session Log entry at the bottom of this file.
 | 5  | Ultimate ability (NOVA)       | 1     | done   | 707af5a |
 | 6  | Upgrade rarity + reroll       | 2     | done   | 0df5187 |
 | 7  | Ricochet rounds               | 2     | done   | aa0f610 |
-| 8  | Chain lightning on crit       | 2     | todo   | needs 6 |
+| 8  | Chain lightning on crit       | 2     | done   |        |
 | 9  | Kill clip                     | 2     | todo   | needs 6 |
 | 10 | Dash trail damage             | 2     | todo   | needs 6 |
 | 11 | Volatile deaths               | 2     | todo   | needs 6 |
@@ -112,7 +112,7 @@ Item 16 (elite modifiers) benefits from 12–14 (more enemy types to modify) but
 **Sketch:** `mods.ricochet = false` → set true by the upgrade. On blaster enemy hit: find nearest other enemy within ~14 units of the impact (skip the one just hit), apply `damage * 0.5`, draw a tracer impact→target. One bounce only (no chains) to keep it sane. Bounce can crit? No — keep it simple, never crits.
 **Done when:** bounce visibly connects, no self-chaining infinite loops, works with EXTENDED MAGS/other mods, no bounce when only one enemy alive.
 
-### [ ] 8. Chain lightning on crit (epic upgrade)
+### [x] 8. Chain lightning on crit (epic upgrade)
 **Goal:** Crits arc lightning to up to 2 nearby enemies.
 **Hook points:** `damageEnemy` crit branch, `mods`, tracer system for the arc visual.
 **Sketch:** `mods.chainCrit = false`. On crit: pick up to 2 nearest enemies within 12 units, deal 25 flat (scaled by `mods.damage`), draw jagged tracer (2–3 segment polyline — extend tracer pool to support 4-point buffers or spawn 2–3 pooled 2-point tracers with a midpoint jitter). Add `sfx.zap` (high sine slide). Guard against recursion: chained damage must not itself trigger chains (pass a flag through `damageEnemy`).
@@ -236,6 +236,34 @@ Append one entry per completed (or abandoned) session, newest first. Format:
 ```
 
 If an item is left `wip`, the entry MUST say exactly what remains and where the work stopped.
+
+### 2026-07-09 — Item 8: Chain lightning on crit — done
+- What landed: `mods.chainCrit` (in `baseMods()`, resets per run) + CHAIN LIGHTNING epic in
+  `UPGRADES` (uses the item-7 `avail: () => !mods.chainCrit` pattern). New `chainLightning(source,
+  from)` called from the crit branch of `damageEnemy` when `mods.chainCrit`: finds the 2 nearest
+  OTHER enemies within `CHAIN_RANGE = 12`, deals `CHAIN_DMG (25) * mods.damage` each via
+  `damageEnemy(t, …, false)` — crit=false is the recursion guard, so an arc can never re-trigger
+  a chain even on a DEADEYE shotgun multi-crit. Visual = `spawnJaggedTracer(from, to)`: 3 pooled
+  2-point tracers with jittered midpoints (±1.4 units), cyan-white `0xdffcff`. New `sfx.zap`
+  (two high sine slides, one delayed 0.02 s).
+- Tuning chosen: 25 flat before `mods.damage`, up to 2 targets, 12-unit range — all per spec.
+  Arcs are drawn from the crit's impact `point` (falls back to the enemy mesh position when
+  `point` is null, e.g. a splash crit — though splash never crits today). Chain damage passes
+  `point = target.mesh.position` so it spawns its own damage number + hit burst, matching ricochet.
+  Chain kills award combo/score but no style bonuses (kw=null path), like ricochet bounces.
+- Notes for next sessions: verified via headless-Chrome playtest (32 checks): 2-nearest pick,
+  exact 25 (+mods.damage scaling), 12-unit cutoff, no self-chain, one zap per crit, jagged
+  3-segment continuous cyan-white arcs, non-crit/upgrade-off/single-enemy no-ops, no recursion
+  (chain KILL doesn't re-arc), arc-killed exploder still detonates without stack overflow, real
+  blaster crit + full 9-pellet shotgun multi-crit through `fireWeapon` (9 chains, no error),
+  reset clears the mod + recycles tracers, 3 waves + die + restart + 1 wave, 42.5 FPS
+  swiftshader, favicon-only 404s. Harness gotcha (new, worth reusing): with the render loop
+  PAUSED the camera stays at y=0, so a `fireWeapon` test ray runs along the floor plane and the
+  floor intersects before any enemy — set `camera.position.y = 1.6` + `updateMatrixWorld(true)`
+  before firing in paused tests. Also `page.on('console', m.text())` does NOT include the failing
+  URL for 404s; filter console noise via `requestfailed`/`response` status instead. Items 10/11
+  (rare/epic booleans) can reuse the `avail` predicate; item 11 (volatile deaths) will pass
+  kw=null through `killEnemy` the same way chains do. No new controls → no touch work.
 
 ### 2026-07-09 — Item 7: Ricochet rounds — done
 - What landed: `mods.ricochet` (in `baseMods()`, so it resets per run) + RICOCHET ROUNDS epic

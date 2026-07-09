@@ -458,6 +458,8 @@ const sfx = {
   jump:  () => beep({ freq: 300, slideTo: 600, type: 'sine', dur: 0.08, vol: 0.06 }),
   dash:  () => beep({ freq: 220, slideTo: 900, type: 'sine', dur: 0.14, vol: 0.1 }),
   crit:  () => beep({ freq: 880, slideTo: 1500, type: 'square', dur: 0.07, vol: 0.1 }),
+  zap:   () => { beep({ freq: 1600, slideTo: 240, type: 'sine', dur: 0.1, vol: 0.13 });
+                 beep({ freq: 2100, slideTo: 400, type: 'sine', dur: 0.07, vol: 0.08, delay: 0.02 }); },
   warn:  () => beep({ freq: 1100, type: 'square', dur: 0.06, vol: 0.12 }),
   nova:  () => { beep({ freq: 900, slideTo: 45, type: 'sawtooth', dur: 0.55, vol: 0.24 });
                  beep({ freq: 70, slideTo: 30, type: 'sine', dur: 0.6, vol: 0.3 });
@@ -564,7 +566,8 @@ let reloading = false, reloadTimer = 0, lastShot = 0, gunRecoil = 0;
 // Run modifiers & upgrades
 // ===========================================================================
 const baseMods = () => ({ damage: 1, fireRate: 1, reload: 1, speed: 1, mag: 1,
-                          dashCD: 3.2, crit: 2, splash: 1, lifesteal: 0, ricochet: false });
+                          dashCD: 3.2, crit: 2, splash: 1, lifesteal: 0, ricochet: false,
+                          chainCrit: false });
 let mods = baseMods();
 let dashCD = 0;
 function applyMagMod() { weapons.forEach(w => { w.magSize = Math.round(w.baseMag * mods.mag); }); }
@@ -581,6 +584,7 @@ const UPGRADES = [
   { name: 'DEADEYE',       rarity: 'rare',   desc: 'Core hits deal +50% extra damage',   apply: () => mods.crit += 0.5 },
   { name: 'PAYLOAD',       rarity: 'rare',   desc: '+25% rocket blast radius',           apply: () => mods.splash *= 1.25 },
   { name: 'RICOCHET ROUNDS', rarity: 'epic', desc: 'Blaster hits bounce to a nearby enemy for 50% damage', apply: () => mods.ricochet = true, avail: () => !mods.ricochet },
+  { name: 'CHAIN LIGHTNING', rarity: 'epic', desc: 'Crits arc lightning to 2 nearby enemies', apply: () => mods.chainCrit = true, avail: () => !mods.chainCrit },
 ];
 let upgradeChoices = [];
 const upgradeEl = document.getElementById('upgrade');
@@ -1071,13 +1075,49 @@ function ricochetFrom(source, point, w) {
   damageEnemy(target, w.damage * mods.damage * 0.5, target.mesh.position.clone(), false);
 }
 
+// Chain lightning (epic): crits arc to up to 2 nearest other enemies within range
+// for flat damage. Arcs never crit (crit=false below), so a chain can't re-trigger
+// itself — no recursion even with DEADEYE shotgun multi-crits.
+const CHAIN_RANGE = 12, CHAIN_DMG = 25, CHAIN_TARGETS = 2;
+function chainLightning(source, from) {
+  const targets = [];
+  for (const e of enemies) {
+    if (e === source) continue;
+    const d = e.mesh.position.distanceTo(from);
+    if (d < CHAIN_RANGE) targets.push([e, d]);
+  }
+  if (!targets.length) return;
+  targets.sort((a, b) => a[1] - b[1]);
+  sfx.zap();
+  for (const [t] of targets.slice(0, CHAIN_TARGETS)) {
+    spawnJaggedTracer(from, t.mesh.position);
+    damageEnemy(t, CHAIN_DMG * mods.damage, t.mesh.position.clone(), false);
+  }
+}
+// Jagged arc = 3 pooled 2-point tracers with jittered midpoints (cyan-white).
+function spawnJaggedTracer(from, to) {
+  let prev = from;
+  for (let i = 1; i <= 3; i++) {
+    const p = to.clone();
+    if (i < 3) {
+      p.lerpVectors(from, to, i / 3);
+      p.x += (Math.random() - 0.5) * 1.4; p.y += (Math.random() - 0.5) * 1.4; p.z += (Math.random() - 0.5) * 1.4;
+    }
+    spawnTracer(prev, p, 0xdffcff);
+    prev = p;
+  }
+}
+
 // kw/kdist: killing weapon + hit distance for direct hitscan hits; null for
 // splash/chain damage (those kills never earn style bonuses).
 function damageEnemy(enemy, dmg, point, crit, kw, kdist) {
   enemy.hp -= dmg; enemy.damageTimer = 0.12;
   spawnDamageNumber(point || enemy.mesh.position, dmg, crit);
   showHitmark(crit);
-  if (crit) { sfx.crit(); state.stats.crits++; if (point) burst(point, 0xffe23a, 10, 14); }
+  if (crit) {
+    sfx.crit(); state.stats.crits++; if (point) burst(point, 0xffe23a, 10, 14);
+    if (mods.chainCrit) chainLightning(enemy, point || enemy.mesh.position.clone());
+  }
   else sfx.hit();
   if (point) burst(point, enemy.color, 6, 10);
   if (enemy.hp <= 0) killEnemy(enemy, kw, kdist);
