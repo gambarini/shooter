@@ -564,7 +564,7 @@ let reloading = false, reloadTimer = 0, lastShot = 0, gunRecoil = 0;
 // Run modifiers & upgrades
 // ===========================================================================
 const baseMods = () => ({ damage: 1, fireRate: 1, reload: 1, speed: 1, mag: 1,
-                          dashCD: 3.2, crit: 2, splash: 1, lifesteal: 0 });
+                          dashCD: 3.2, crit: 2, splash: 1, lifesteal: 0, ricochet: false });
 let mods = baseMods();
 let dashCD = 0;
 function applyMagMod() { weapons.forEach(w => { w.magSize = Math.round(w.baseMag * mods.mag); }); }
@@ -580,6 +580,7 @@ const UPGRADES = [
   { name: 'PHASE COILS',   rarity: 'rare',   desc: '-20% dash cooldown',                 apply: () => mods.dashCD *= 0.8 },
   { name: 'DEADEYE',       rarity: 'rare',   desc: 'Core hits deal +50% extra damage',   apply: () => mods.crit += 0.5 },
   { name: 'PAYLOAD',       rarity: 'rare',   desc: '+25% rocket blast radius',           apply: () => mods.splash *= 1.25 },
+  { name: 'RICOCHET ROUNDS', rarity: 'epic', desc: 'Blaster hits bounce to a nearby enemy for 50% damage', apply: () => mods.ricochet = true, avail: () => !mods.ricochet },
 ];
 let upgradeChoices = [];
 const upgradeEl = document.getElementById('upgrade');
@@ -592,7 +593,8 @@ function rollRarity() {
   return r < 70 ? 'common' : r < 95 ? 'rare' : 'epic';
 }
 function drawUpgradeChoices() {
-  const pool = [...UPGRADES];
+  // `avail` (optional) hides one-shot upgrades the player already owns.
+  const pool = UPGRADES.filter(u => !u.avail || u.avail());
   return Array.from({ length: 3 }, () => {
     const want = rollRarity();
     // if the rolled tier is exhausted in the pool, downgrade (epic→rare→common), then take anything
@@ -1045,11 +1047,28 @@ function fireWeapon() {
         const crit = hits.some(h => h.object === enemy.core);
         state.stats.hits++;
         damageEnemy(enemy, w.damage * mods.damage * (crit ? mods.crit : 1), hit.point, crit, w, hit.distance);
+        if (mods.ricochet && w.name === 'BLASTER') ricochetFrom(enemy, hit.point, w);
       }
       else burst(hit.point, 0x66ccff, 4, 8);
     }
     spawnTracer(muzzleWorld, end, w.color);
   }
+}
+
+// Ricochet rounds (epic): a blaster hit bounces once to the nearest OTHER enemy
+// within range for half damage. Never crits, never chains (called from fireWeapon,
+// not damageEnemy), and passes kw=null so bounce kills earn no style bonuses.
+const RICOCHET_RANGE = 14;
+function ricochetFrom(source, point, w) {
+  let target = null, best = RICOCHET_RANGE;
+  for (const e of enemies) {
+    if (e === source) continue;
+    const d = e.mesh.position.distanceTo(point);
+    if (d < best) { best = d; target = e; }
+  }
+  if (!target) return;
+  spawnTracer(point, target.mesh.position, w.color);
+  damageEnemy(target, w.damage * mods.damage * 0.5, target.mesh.position.clone(), false);
 }
 
 // kw/kdist: killing weapon + hit distance for direct hitscan hits; null for

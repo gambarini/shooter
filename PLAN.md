@@ -14,7 +14,7 @@ close out with a Session Log entry at the bottom of this file.
 | 4  | Style-bonus scoring           | 1     | done   | d0e3cd9 |
 | 5  | Ultimate ability (NOVA)       | 1     | done   | 707af5a |
 | 6  | Upgrade rarity + reroll       | 2     | done   | 0df5187 |
-| 7  | Ricochet rounds               | 2     | todo   | needs 6 |
+| 7  | Ricochet rounds               | 2     | done   |        |
 | 8  | Chain lightning on crit       | 2     | todo   | needs 6 |
 | 9  | Kill clip                     | 2     | todo   | needs 6 |
 | 10 | Dash trail damage             | 2     | todo   | needs 6 |
@@ -106,7 +106,7 @@ Item 16 (elite modifiers) benefits from 12–14 (more enemy types to modify) but
 **Sketch:** Add `rarity: 'common'|'rare'|'epic'` to each upgrade def. Weighted draw (~70/25/5, epic weight can grow with wave). Card CSS variants: common = current cyan, rare = purple border+glow, epic = gold. Existing 10 upgrades become commons/rares; items 7–11 add the epics. Add a REROLL button in the overlay (usable once per run, `state.rerolled`); reroll redraws all 3 choices. Keyboard: `R` while choosing.
 **Done when:** rarity distribution feels right over ~10 waves, reroll works once and greys out, epic cards visually pop, all reset per run.
 
-### [ ] 7. Ricochet rounds (epic upgrade)
+### [x] 7. Ricochet rounds (epic upgrade)
 **Goal:** Blaster hits bounce to the nearest other enemy for 50% damage.
 **Hook points:** hitscan branch of `fireWeapon` (after `damageEnemy`), `spawnTracer` (draw the bounce), `mods`.
 **Sketch:** `mods.ricochet = false` → set true by the upgrade. On blaster enemy hit: find nearest other enemy within ~14 units of the impact (skip the one just hit), apply `damage * 0.5`, draw a tracer impact→target. One bounce only (no chains) to keep it sane. Bounce can crit? No — keep it simple, never crits.
@@ -236,6 +236,27 @@ Append one entry per completed (or abandoned) session, newest first. Format:
 ```
 
 If an item is left `wip`, the entry MUST say exactly what remains and where the work stopped.
+
+### 2026-07-09 — Item 7: Ricochet rounds — done
+- What landed: `mods.ricochet` (in `baseMods()`, so it resets per run) + RICOCHET ROUNDS epic
+  in `UPGRADES`. Hitscan branch of `fireWeapon` calls `ricochetFrom(enemy, hit.point, w)` on
+  blaster enemy hits only (`w.name === 'BLASTER'` — shotgun/rocket never bounce). The helper
+  finds the nearest OTHER enemy within `RICOCHET_RANGE = 14` of the impact, deals
+  `w.damage * mods.damage * 0.5` (17 base), draws a pooled tracer impact→target in blaster
+  cyan. No chains (called from `fireWeapon`, not `damageEnemy`), never crits (`crit=false`),
+  `kw=null` so bounce kills earn combo/score but no style bonuses.
+- Tuning chosen: added a generic optional `avail: () => bool` predicate on upgrade defs,
+  filtered in `drawUpgradeChoices` — one-shot boolean upgrades stop appearing once owned
+  (RICOCHET ROUNDS uses `() => !mods.ricochet`). Bounce damage number/burst render at the
+  target's mesh position (there's no real ray to intersect).
+- Notes for next sessions: items 8/10/11 (also boolean epics/rares) should reuse the `avail`
+  predicate. Verified via headless-Chrome playtest (25 checks: pool draw/ownership filtering,
+  exact 50% damage + mods.damage scaling, nearest-target pick, 14-unit cutoff, single-enemy
+  no-op, kill-without-chain, combo/score-but-no-style on bounce kills, full fireWeapon path
+  for blaster/shotgun/upgrade-off, reset, 3 waves + die + restart + 1 wave, 43 FPS
+  swiftshader, no console errors). Test-harness gotcha: with the game paused, repositioned
+  meshes need `mesh.updateMatrixWorld(true)` before raycast-based tests (render loop normally
+  refreshes matrices; damage was silently missing without it).
 
 ### 2026-07-09 — Perf fix (not a roadmap item): point-light cull + projectile pooling — done
 - What landed: removed the per-entity `PointLight`s from regular enemies, enemy shots and
