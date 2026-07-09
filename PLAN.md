@@ -13,7 +13,7 @@ close out with a Session Log entry at the bottom of this file.
 | 3  | Low-HP danger state           | 1     | done   | a3a4b4b |
 | 4  | Style-bonus scoring           | 1     | done   | d0e3cd9 |
 | 5  | Ultimate ability (NOVA)       | 1     | done   | 707af5a |
-| 6  | Upgrade rarity + reroll       | 2     | done   |        |
+| 6  | Upgrade rarity + reroll       | 2     | done   | 0df5187 |
 | 7  | Ricochet rounds               | 2     | todo   | needs 6 |
 | 8  | Chain lightning on crit       | 2     | todo   | needs 6 |
 | 9  | Kill clip                     | 2     | todo   | needs 6 |
