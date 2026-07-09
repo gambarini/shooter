@@ -13,7 +13,7 @@ close out with a Session Log entry at the bottom of this file.
 | 3  | Low-HP danger state           | 1     | done   | a3a4b4b |
 | 4  | Style-bonus scoring           | 1     | done   | d0e3cd9 |
 | 5  | Ultimate ability (NOVA)       | 1     | done   | 707af5a |
-| 6  | Upgrade rarity + reroll       | 2     | todo   |        |
+| 6  | Upgrade rarity + reroll       | 2     | done   |        |
 | 7  | Ricochet rounds               | 2     | todo   | needs 6 |
 | 8  | Chain lightning on crit       | 2     | todo   | needs 6 |
 | 9  | Kill clip                     | 2     | todo   | needs 6 |
@@ -100,7 +100,7 @@ Item 16 (elite modifiers) benefits from 12–14 (more enemy types to modify) but
 
 ## Phase 2 — Upgrade system depth
 
-### [ ] 6. Upgrade rarity tiers + reroll  *(do this before 7–11)*
+### [x] 6. Upgrade rarity tiers + reroll  *(do this before 7–11)*
 **Goal:** Upgrades get common/rare/epic tiers with color-coded cards, plus one reroll per run.
 **Hook points:** `UPGRADES` array, `showUpgrades` (card HTML), `pickUpgrade`, upgrade CSS (`.upcard`), `resetGame`.
 **Sketch:** Add `rarity: 'common'|'rare'|'epic'` to each upgrade def. Weighted draw (~70/25/5, epic weight can grow with wave). Card CSS variants: common = current cyan, rare = purple border+glow, epic = gold. Existing 10 upgrades become commons/rares; items 7–11 add the epics. Add a REROLL button in the overlay (usable once per run, `state.rerolled`); reroll redraws all 3 choices. Keyboard: `R` while choosing.
@@ -231,6 +231,28 @@ Append one entry per completed (or abandoned) session, newest first. Format:
 ```
 
 If an item is left `wip`, the entry MUST say exactly what remains and where the work stopped.
+
+### 2026-07-09 — Item 6: Upgrade rarity tiers + reroll — done
+- What landed: `rarity` field on all 10 upgrades (6 common / 4 rare — NANO LEECH, PHASE COILS,
+  DEADEYE, PAYLOAD are the rares; epics arrive with items 7–11). Weighted draw in
+  `drawUpgradeChoices()`: common 70 / rare 25 / epic `5 + min(10, wave)`, with tier-downgrade
+  fallback (epic→rare→common→anything) when a tier is exhausted in the 3-card hand; hands stay
+  duplicate-free. Card CSS variants: `.upcard.rare` purple `#be6eff`, `.upcard.epic` gold
+  `#ffc83c`, plus a small `.uprarity` tag on every card. `#rerollBtn` in the upgrade overlay
+  redraws all 3 cards once per run (`state.rerolled`, reset in `resetGame`); `R` while choosing
+  triggers it (handled in the `state.choosing` keydown branch, so the reload bind is untouched);
+  used state = `.used` class (30% opacity, pointer-events off). `sfx.reroll` = two quick
+  triangle blips using the `delay` param from item 3.
+- Tuning chosen: with no epics in the pool yet, epic rolls downgrade to rare — measured splits:
+  wave 1 ≈ 69.6% common / 30.4% rare, wave 10 ≈ 63.1/36.9 (3000 hands each). With one epic
+  injected at wave 10, ~11.4% of slots come up epic — feels right for "epic weight grows".
+- Notes for next sessions: items 7–11 only need `rarity: 'epic'` on their defs — draw, CSS and
+  fallback already handle epics (verified with an injected dummy epic, screenshot taken).
+  Reroll is a DOM button inside the overlay, so touch gets it for free — no `.tbtn` needed.
+  Verified via headless-Chrome playtest (23 checks: distributions, no-duplicate hands, epic/rare
+  computed border colors, R-key reroll + grey-out + second-R ignored + stays consumed across
+  waves, resets on restart, card-click pick path, 3 waves + die + restart + 1 wave, 38 FPS under
+  swiftshader, no console errors beyond the pre-existing favicon 404).
 
 ### 2026-07-09 — Item 5: Ultimate ability (NOVA) — done
 - What landed: `state.ult` 0–100 (+8/kill, +25/boss, tallied in `killEnemy`); `E` key (or new
