@@ -212,6 +212,11 @@ Banner via `flashCombo` with distinct color + `sfx.wave` variant. Revert everyth
 ## Cross-cutting reminders
 
 - After any item: play 3+ waves, restart once, and check the FPS counter (settings → SHOW FPS) with shotgun + heavy particle load.
+- **Point lights are a hard budget** (2026-07-09 perf fix): every `PointLight` multiplies the
+  fragment cost of ALL lit materials scene-wide — per-entity lights tanked wave 13+ to ~6 FPS.
+  Never attach lights to things that scale with wave/entity count (enemies, shots, barrels…);
+  bounded singletons (boss, nova, laser sweep) are fine. Emissive material + a basic-material
+  core mesh gives the neon glow without lights.
 - Anything added to the scene per-run must be handled in `resetGame`.
 - New enemy types: add to minimap colors, verify `disposeEnemy` covers their children, and confirm they respect `collideArena` (or deliberately don't, like WASP).
 - New upgrades: add to `UPGRADES` with rarity (post-item-6), verify they reset via `baseMods()`.
@@ -231,6 +236,24 @@ Append one entry per completed (or abandoned) session, newest first. Format:
 ```
 
 If an item is left `wip`, the entry MUST say exactly what remains and where the work stopped.
+
+### 2026-07-09 — Perf fix (not a roadmap item): point-light cull + projectile pooling — done
+- What landed: removed the per-entity `PointLight`s from regular enemies, enemy shots and
+  pickups (kept: boss, rockets — ammo-bounded — nova, muzzle, the 2 arena lights, so the scene
+  now holds ≤ ~7 lights instead of 30+ at high waves). Regular enemies no longer `castShadow`
+  (boss still does). Rockets and enemy shots are now pooled (`rocketPool`/`enemyShotPool`,
+  shared geometry + material, `freeRocket`/`freeEnemyShot`) per the pooling convention;
+  `disposeProjectile` is gone.
+- Tuning chosen: nothing visual was compensated — emissive materials + core meshes already
+  carry the neon look; the loss of per-enemy floor glow is barely noticeable.
+- Notes for next sessions: user reported wave 13 sluggishness; cause was three.js forward
+  lighting — every point light is evaluated by every lit pixel (full-screen floor), and each
+  new light count recompiles all lit shaders. Headless-Chrome A/B at a wave-13 load (23 enemies
+  + boss + pickups, swiftshader): 6.5 → 35.3 FPS, lights 31 → 5. Also verified: both pools
+  recycle and survive `resetGame` without leaking, 3 waves + die + restart + 1 wave clean, no
+  console errors (favicon 404 only). See the new "point lights are a hard budget" cross-cutting
+  reminder — item 17's beam light is fine (singleton) but item 18's per-barrel light should
+  become an emissive band only.
 
 ### 2026-07-09 — Item 6: Upgrade rarity tiers + reroll — done
 - What landed: `rarity` field on all 10 upgrades (6 common / 4 rare — NANO LEECH, PHASE COILS,
