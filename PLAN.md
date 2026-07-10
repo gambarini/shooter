@@ -19,7 +19,7 @@ close out with a Session Log entry at the bottom of this file.
 | 9  | Kill clip                     | 2     | done   | 1cb3020 |
 | 10 | Dash trail damage             | 2     | done   | b9d1f88 |
 | 11 | Volatile deaths               | 2     | done   | 2da8e82 |
-| 12 | Flying enemy — WASP           | 3     | done   |        |
+| 12 | Flying enemy — WASP           | 3     | done   | 7c5700d |
 | 13 | Shielded tank — BULWARK       | 3     | todo   |        |
 | 14 | Splitter enemy                | 3     | todo   |        |
 | 15 | Boss phases                   | 3     | todo   |        |
