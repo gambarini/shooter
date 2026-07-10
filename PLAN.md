@@ -21,7 +21,7 @@ close out with a Session Log entry at the bottom of this file.
 | 11 | Volatile deaths               | 2     | done   | 2da8e82 |
 | 12 | Flying enemy — WASP           | 3     | done   | 7c5700d |
 | 13 | Shielded tank — BULWARK       | 3     | done   | cd297f2 |
-| 14 | Splitter enemy                | 3     | done   |        |
+| 14 | Splitter enemy                | 3     | done   | 1a61931 |
 | 15 | Boss phases                   | 3     | todo   |        |
 | 16 | Elite enemy modifiers         | 3     | todo   |        |
 | 17 | Arena hazard — laser sweep    | 4     | todo   |        |
