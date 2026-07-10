@@ -464,6 +464,9 @@ const sfx = {
                  beep({ freq: 2100, slideTo: 400, type: 'sine', dur: 0.07, vol: 0.08, delay: 0.02 }); },
   warn:  () => beep({ freq: 1100, type: 'square', dur: 0.06, vol: 0.12 }),
   dive:  () => beep({ freq: 1500, slideTo: 220, type: 'sawtooth', dur: 0.28, vol: 0.11 }),
+  clink: () => { beep({ freq: 2600, slideTo: 1400, type: 'square', dur: 0.05, vol: 0.12 });
+                 beep({ freq: 3400, type: 'triangle', dur: 0.03, vol: 0.06 }); },
+  charge:() => { beep({ freq: 90, slideTo: 340, type: 'sawtooth', dur: 0.5, vol: 0.2 }); noiseBurst(0.25, 0.15); },
   nova:  () => { beep({ freq: 900, slideTo: 45, type: 'sawtooth', dur: 0.55, vol: 0.24 });
                  beep({ freq: 70, slideTo: 30, type: 'sine', dur: 0.6, vol: 0.3 });
                  noiseBurst(0.45, 0.3); },
@@ -833,8 +836,10 @@ const chaserGeo = new THREE.IcosahedronGeometry(1.1, 0);
 const shooterGeo = new THREE.OctahedronGeometry(1.2, 0);
 const exploderGeo = new THREE.TetrahedronGeometry(1.35, 0);
 const waspGeo = new THREE.ConeGeometry(0.85, 1.5, 6);
+const bulwarkGeo = new THREE.BoxGeometry(2.0, 2.4, 1.4);
+const bulwarkShieldGeo = new THREE.BoxGeometry(2.4, 2.6, 0.16);
 const bossGeo = new THREE.DodecahedronGeometry(3.0, 0);
-const SHARED_ENEMY_GEO = new Set([chaserGeo, shooterGeo, exploderGeo, waspGeo, bossGeo]);
+const SHARED_ENEMY_GEO = new Set([chaserGeo, shooterGeo, exploderGeo, waspGeo, bulwarkGeo, bulwarkShieldGeo, bossGeo]);
 // Free the per-enemy material, plus the core child's unique geometry/material and its light.
 function disposeEnemy(e) {
   scene.remove(e.mesh);
@@ -857,25 +862,37 @@ function spawnEnemy(wave) {
   const isShooter = wave >= 2 && Math.random() < Math.min(0.4, 0.12 + wave * 0.03);
   const isExploder = !isShooter && wave >= 3 && Math.random() < Math.min(0.28, 0.1 + wave * 0.02);
   const isWasp = !isShooter && !isExploder && wave >= 4 && Math.random() < Math.min(0.25, 0.08 + wave * 0.02);
-  const type = isShooter ? 'shooter' : isExploder ? 'exploder' : isWasp ? 'wasp' : 'chaser';
-  const hue = isShooter ? 0xb04bff : isExploder ? 0x8aff3a : isWasp ? 0x3af0ff : (Math.random() < 0.5 ? 0xff2e88 : 0xff8f3a);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x1a0a16, emissive: hue, emissiveIntensity: 0.9,
+  const isBulwark = !isShooter && !isExploder && !isWasp && wave >= 5 && Math.random() < Math.min(0.18, 0.05 + wave * 0.015);
+  const type = isShooter ? 'shooter' : isExploder ? 'exploder' : isWasp ? 'wasp' : isBulwark ? 'bulwark' : 'chaser';
+  const hue = isShooter ? 0xb04bff : isExploder ? 0x8aff3a : isWasp ? 0x3af0ff : isBulwark ? 0xff7a1a : (Math.random() < 0.5 ? 0xff2e88 : 0xff8f3a);
+  const mat = new THREE.MeshStandardMaterial({ color: isBulwark ? 0x14090a : 0x1a0a16, emissive: hue, emissiveIntensity: 0.9,
                                                metalness: 0.4, roughness: 0.3, flatShading: true });
-  const mesh = new THREE.Mesh(isShooter ? shooterGeo : isExploder ? exploderGeo : isWasp ? waspGeo : chaserGeo, mat);
+  const mesh = new THREE.Mesh(isShooter ? shooterGeo : isExploder ? exploderGeo : isWasp ? waspGeo : isBulwark ? bulwarkGeo : chaserGeo, mat);
   const hoverH = WASP_HEIGHT + Math.random() * 3 - 1;   // each wasp picks a lane in ~6–9
-  mesh.position.set(x, isWasp ? hoverH : 1.6, z);
+  mesh.position.set(x, isWasp ? hoverH : isBulwark ? 1.4 : 1.6, z);
   if (isWasp) mesh.rotation.x = Math.PI;   // stinger down
+  if (isBulwark) mesh.rotation.y = Math.atan2(player.pos.x - x, player.pos.z - z);   // faces the player from frame one
   const core = new THREE.Mesh(new THREE.SphereGeometry(0.45, 8, 8), new THREE.MeshBasicMaterial({ color: hue }));
+  if (isBulwark) core.position.z = -0.5;   // crit core sits at the open back
   mesh.add(core);
+  // BULWARK front shield plate — while shieldUp, shots at the front face are blocked
+  let plate = null;
+  if (isBulwark) {
+    plate = new THREE.Mesh(bulwarkShieldGeo, new THREE.MeshStandardMaterial({
+      color: 0x1a0d02, emissive: 0xffb347, emissiveIntensity: 1.1,
+      metalness: 0.6, roughness: 0.3, flatShading: true }));
+    plate.position.z = 0.88;
+    mesh.add(plate);
+  }
   scene.add(mesh);
 
   const boost = 1 + wave * 0.06;
-  const hp = (isShooter ? 40 : isExploder ? 30 : isWasp ? 35 : 50) + wave * (isExploder ? 8 : isWasp ? 8 : 12);
+  const hp = (isShooter ? 40 : isExploder ? 30 : isWasp ? 35 : isBulwark ? 110 : 50) + wave * (isExploder ? 8 : isWasp ? 8 : isBulwark ? 15 : 12);
   enemies.push({
     mesh, core, type,
     hp, maxHp: hp,
-    speed: (isShooter ? 3.5 : isExploder ? 7.5 + Math.random() * 2 : isWasp ? 6 + Math.random() * 1.5 : 5.5 + Math.random() * 2.5) * boost,
-    radius: isWasp ? 0.9 : isExploder ? 1.1 : 1.3, spin: Math.random() * 2 - 1, bob: Math.random() * Math.PI * 2,
+    speed: (isShooter ? 3.5 : isExploder ? 7.5 + Math.random() * 2 : isWasp ? 6 + Math.random() * 1.5 : isBulwark ? 2.0 : 5.5 + Math.random() * 2.5) * boost,
+    radius: isWasp ? 0.9 : isExploder ? 1.1 : isBulwark ? 1.6 : 1.3, spin: Math.random() * 2 - 1, bob: Math.random() * Math.PI * 2,
     color: hue, damageTimer: 0, fireCD: 1 + Math.random() * 2, preferDist: 18 + Math.random() * 6,
     fuse: -1,
     // wasp state machine: orbit → telegraph → dive → climb → orbit
@@ -883,6 +900,10 @@ function spawnEnemy(wave) {
     orbitDir: Math.random() < 0.5 ? 1 : -1,
     orbitAngle: Math.atan2(z - player.pos.z, x - player.pos.x),
     diveDir: isWasp ? new THREE.Vector3() : null,
+    // bulwark state machine: walk → windup → charge → stagger (shield down) → walk
+    plate, shieldUp: isBulwark,
+    bwState: 'walk', bwT: 3 + Math.random() * 2,
+    chargeDir: isBulwark ? new THREE.Vector3() : null,
   });
 }
 
@@ -1105,17 +1126,41 @@ function fireWeapon() {
       const hit = hits[0]; end = hit.point.clone();
       const enemy = enemies.find(e => e.mesh === hit.object || e.core === hit.object);
       if (enemy) {
-        // The core sits inside the hull, so the first hit is the hull surface;
-        // it's a crit when the same ray also passes through that enemy's core.
-        const crit = hits.some(h => h.object === enemy.core);
-        state.stats.hits++;
-        damageEnemy(enemy, w.damage * mods.damage * (crit ? mods.crit : 1), hit.point, crit, w, hit.distance);
-        if (mods.ricochet && w.name === 'BLASTER') ricochetFrom(enemy, hit.point, w);
+        if (bulwarkBlocks(enemy, dir)) {
+          burst(hit.point, 0xffd9a0, 6, 10); sfx.clink();   // shield spark — no damage, no ricochet
+        } else {
+          // The core sits inside the hull, so the first hit is the hull surface;
+          // it's a crit when the same ray also passes through that enemy's core.
+          const crit = hits.some(h => h.object === enemy.core);
+          state.stats.hits++;
+          damageEnemy(enemy, w.damage * mods.damage * (crit ? mods.crit : 1), hit.point, crit, w, hit.distance);
+          if (mods.ricochet && w.name === 'BLASTER') ricochetFrom(enemy, hit.point, w);
+        }
       }
       else burst(hit.point, 0x66ccff, 4, 8);
     }
     spawnTracer(muzzleWorld, end, w.color);
   }
+}
+
+// BULWARK front shield: while up, shots coming at the front face are blocked.
+// Facing is yaw-only (set in the enemy loop); shotDir points shooter→target and
+// forward points bulwark→player, so a frontal hit has dot ≈ -1. The -0.4
+// threshold blocks a ~±66° cone in front — sides and back are open.
+function bulwarkBlocks(e, shotDir) {
+  if (e.type !== 'bulwark' || !e.shieldUp) return false;
+  return shotDir.x * Math.sin(e.mesh.rotation.y) + shotDir.z * Math.cos(e.mesh.rotation.y) < -0.4;
+}
+// Charge over (hit the player, whiffed, or slammed a wall) → shield drops for
+// the punish window: plate swings open and its glow dies, so "shoot it NOW"
+// reads without text.
+function bulwarkStagger(e) {
+  e.bwState = 'stagger'; e.bwT = 1.5;
+  e.shieldUp = false;
+  e.plate.rotation.y = 1.35;
+  e.plate.material.emissiveIntensity = 0.08;
+  e.mesh.material.emissiveIntensity = 0.9;
+  noiseBurst(0.18, 0.14);   // vents hiss open
 }
 
 // Ricochet rounds (epic): a blaster hit bounces once to the nearest OTHER enemy
@@ -1293,7 +1338,8 @@ function explodeRocket(pos) {
   let hitAny = false;
   for (const e of [...enemies]) {
     const d = e.mesh.position.distanceTo(pos);
-    if (d < splash) { hitAny = true; damageEnemy(e, w.damage * mods.damage * (1 - d / splash), null); }
+    // splash doesn't care about facing, but a raised bulwark shield still halves it
+    if (d < splash) { hitAny = true; damageEnemy(e, w.damage * mods.damage * (1 - d / splash) * (e.type === 'bulwark' && e.shieldUp ? 0.5 : 1), null); }
   }
   if (hitAny) state.stats.hits++;
   // self splash if too close
@@ -1629,6 +1675,56 @@ function update(dt) {
           e.orbitAngle = Math.atan2(e.mesh.position.z - player.pos.z, e.mesh.position.x - player.pos.x);
         }
       }
+    } else if (e.type === 'bulwark') {
+      // BULWARK: shielded slow advance → 1 s wind-up → straight-line charge →
+      // 1.5 s shield-down stagger. Yaw-only facing (never free-spins): the front
+      // plate blocking shots IS the mechanic, and the capped turn rate is what
+      // makes flanking (dash / close strafe) beat it.
+      if (e.bwState === 'walk' || e.bwState === 'windup') {
+        let dyaw = Math.atan2(toP.x, toP.z) - e.mesh.rotation.y;
+        dyaw = ((dyaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+        e.mesh.rotation.y += Math.max(-1.8 * dt, Math.min(1.8 * dt, dyaw));
+      }
+      if (e.bwState === 'walk') {
+        e.bwT -= dt;
+        steerAroundObstacles(e, toP, dist);
+        e.mesh.position.x += toP.x * e.speed * dt;
+        e.mesh.position.z += toP.z * e.speed * dt;
+        if (e.bwT <= 0) {
+          if (dist < 32 && !segBlocked(e.mesh.position.x, e.mesh.position.z, player.pos.x, player.pos.z)) {
+            e.bwState = 'windup'; e.bwT = 1.0; sfx.warn();
+          } else e.bwT = 1;   // too far / no line of sight — check again shortly
+        }
+      } else if (e.bwState === 'windup') {
+        e.bwT -= dt;
+        const flash = 2 + Math.sin(t * 25) * 1.5;
+        e.mesh.material.emissiveIntensity = flash;
+        e.plate.material.emissiveIntensity = flash;
+        if (e.bwT <= 0) {
+          e.bwState = 'charge'; e.bwT = 0.9;
+          // charge line locked HERE (wind-up end) — strafing during the wind-up dodges it
+          e.chargeDir.set(player.pos.x - e.mesh.position.x, 0, player.pos.z - e.mesh.position.z).normalize();
+          e.mesh.rotation.y = Math.atan2(e.chargeDir.x, e.chargeDir.z);
+          e.plate.material.emissiveIntensity = 1.1;
+          sfx.charge();
+        }
+      } else if (e.bwState === 'charge') {
+        e.bwT -= dt;
+        e.mesh.position.addScaledVector(e.chargeDir, 24 * dt);
+        if (dist < e.radius + player.radius + 0.4) {
+          damagePlayer(25, e.mesh.position);
+          player.vel.x += e.chargeDir.x * 12; player.vel.z += e.chargeDir.z * 12;   // shoved
+          bulwarkStagger(e);
+        } else if (e.bwT <= 0) bulwarkStagger(e);
+      } else {   // stagger — shield open, punish window
+        e.bwT -= dt;
+        if (e.bwT <= 0) {
+          e.bwState = 'walk'; e.bwT = 4.5 + Math.random() * 1.5;
+          e.shieldUp = true;
+          e.plate.rotation.y = 0; e.plate.material.emissiveIntensity = 1.1;
+          sfx.clink();   // plate slams back shut
+        }
+      }
     } else {
       // chaser / exploder pursuit
       steerAroundObstacles(e, toP, dist);
@@ -1640,6 +1736,17 @@ function update(dt) {
     e.bob += dt * 3;
     if (e.type === 'wasp') {
       collideWasp(e);
+    } else if (e.type === 'bulwark') {
+      // heavy: barely bobs; yaw is owned by its state machine (no free spin)
+      e.mesh.position.y = 1.4 + Math.sin(e.bob) * 0.08;
+      const px = e.mesh.position.x, pz = e.mesh.position.z;
+      collideArena(e.mesh.position, e.radius);
+      // a charge clamped by wall/pillar = slam: clang + early stagger
+      if (e.bwState === 'charge' && Math.hypot(e.mesh.position.x - px, e.mesh.position.z - pz) > 0.05) {
+        burst(e.mesh.position, e.color, 10, 12); sfx.clink();
+        state.shake = Math.min(0.5, state.shake + 0.2);
+        bulwarkStagger(e);
+      }
     } else {
       e.mesh.position.y = (e.type === 'boss' ? 3.2 : 1.6) + Math.sin(e.bob) * 0.3;
       e.mesh.rotation.y += e.spin * dt * 2;
@@ -1648,7 +1755,7 @@ function update(dt) {
     }
 
     if (e.damageTimer > 0) { e.damageTimer -= dt; e.mesh.material.emissiveIntensity = 2.2; e.mesh.scale.setScalar(1.15); }
-    else if (!(e.type === 'exploder' && e.fuse >= 0) && !(e.type === 'wasp' && e.waspState === 'telegraph')) { e.mesh.material.emissiveIntensity = 0.9; e.mesh.scale.setScalar(1); }
+    else if (!(e.type === 'exploder' && e.fuse >= 0) && !(e.type === 'wasp' && e.waspState === 'telegraph') && !(e.type === 'bulwark' && e.bwState === 'windup')) { e.mesh.material.emissiveIntensity = 0.9; e.mesh.scale.setScalar(1); }
 
     if ((e.type === 'chaser' || e.type === 'boss') && dist < e.radius + player.radius + 0.4) {
       if (!e._cool || t - e._cool > 0.6) {
@@ -1810,8 +1917,8 @@ function drawMinimap() {
   // enemies
   for (const e of enemies) {
     const [px, pz] = w2m(e.mesh.position.x, e.mesh.position.z);
-    mctx.fillStyle = e.type === 'boss' ? '#ffe23a' : e.type === 'shooter' ? '#b04bff' : e.type === 'exploder' ? '#8aff3a' : e.type === 'wasp' ? '#3af0ff' : '#ff2e88';
-    mctx.beginPath(); mctx.arc(px, pz, e.type === 'boss' ? 5 : 2.6, 0, 7); mctx.fill();
+    mctx.fillStyle = e.type === 'boss' ? '#ffe23a' : e.type === 'shooter' ? '#b04bff' : e.type === 'exploder' ? '#8aff3a' : e.type === 'wasp' ? '#3af0ff' : e.type === 'bulwark' ? '#ff7a1a' : '#ff2e88';
+    mctx.beginPath(); mctx.arc(px, pz, e.type === 'boss' ? 5 : e.type === 'bulwark' ? 3.4 : 2.6, 0, 7); mctx.fill();
   }
   // player triangle (facing -yaw)
   const [px, pz] = w2m(player.pos.x, player.pos.z);

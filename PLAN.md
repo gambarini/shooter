@@ -20,7 +20,7 @@ close out with a Session Log entry at the bottom of this file.
 | 10 | Dash trail damage             | 2     | done   | b9d1f88 |
 | 11 | Volatile deaths               | 2     | done   | 2da8e82 |
 | 12 | Flying enemy — WASP           | 3     | done   | 7c5700d |
-| 13 | Shielded tank — BULWARK       | 3     | todo   |        |
+| 13 | Shielded tank — BULWARK       | 3     | done   |        |
 | 14 | Splitter enemy                | 3     | todo   |        |
 | 15 | Boss phases                   | 3     | todo   |        |
 | 16 | Elite enemy modifiers         | 3     | todo   |        |
@@ -146,7 +146,7 @@ Item 16 (elite modifiers) benefits from 12–14 (more enemy types to modify) but
 **Sketch:** Geometry: small cone or squashed icosahedron, color `#3af0ff`-ish (distinct from all current hues). Appears wave 4+. States: `orbit` (circle player at radius ~14, height 7, bob) → every 4–6 s `telegraph` (0.6 s, flash bright + `sfx.warn`) → `dive` (straight line at player's position captured at telegraph end, fast) → on floor/whiff or hit (12 dmg), climb back to orbit. Vertical position means hitscan already works (raycast is 3D); melee-contact check must use full 3D distance for this type.
 **Done when:** dives are dodgeable via dash/strafe, wasp visible on minimap, doesn't get stuck in floor or pillars (skip `collideArena` Y-clamp appropriately, X/Z clamp still applies), boss waves can include wasps.
 
-### [ ] 13. Shielded tank — BULWARK
+### [x] 13. Shielded tank — BULWARK
 **Goal:** Slow enemy with a front shield that blocks shots; vulnerable from behind/sides or briefly after its charge attack.
 **Hook points:** `spawnEnemy`, enemy loop, hitscan branch of `fireWeapon` (shield check), rockets (splash ignores shield or halves damage — pick: halves).
 **Sketch:** Big box/slab body, dark with orange emissive; a visibly distinct shield plate child mesh on the front face. Appears wave 5+. Always faces the player (rotate mesh yaw toward player — note other enemies spin freely; this one must not). Shield check: on hit, compare hit direction vs enemy facing (`dot(shotDir, enemyForward) < -0.4` → blocked: spark burst, `sfx` clink, no damage). Every ~5 s: 1 s wind-up telegraph then a fast charge in a straight line (heavy contact damage 25); for 1.5 s after the charge ends the shield drops (visual: plate swings open / emissive off).
@@ -236,6 +236,43 @@ Append one entry per completed (or abandoned) session, newest first. Format:
 ```
 
 If an item is left `wip`, the entry MUST say exactly what remains and where the work stopped.
+
+### 2026-07-10 — Item 13: Shielded tank — BULWARK — done
+- What landed: `bulwark` enemy type (wave 5+, chance `min(0.18, 0.05 + wave*0.015)` rolled after
+  shooter/exploder/wasp), shared `bulwarkGeo` slab (2.0×2.4×1.4) + `bulwarkShieldGeo` front
+  plate (2.4×2.6×0.16 at local z 0.88, per-enemy material), both in `SHARED_ENEMY_GEO`. Hue
+  `0xff7a1a`, hp `110 + wave*15`, speed `2.0*boost`, radius 1.6, crit core moved to local
+  z −0.5 (reachable from behind). State machine: `walk` (slow advance, yaw-only facing capped
+  at 1.8 rad/s — never free-spins) → every ~4.5–6 s with dist<32 + clear LOS → `windup` (1 s,
+  emissive pulse on body+plate, `sfx.warn`) → `charge` (dir locked at wind-up END at the
+  player's position then; 24 u/s for 0.9 s; contact = 25 dmg + velocity shove; wall/pillar
+  clamp = slam burst + early end) → `stagger` (1.5 s, `shieldUp=false`, plate swings open
+  rot.y 1.35 + glow 0.08, vent hiss) → walk. `bulwarkBlocks(e, shotDir)` in the hitscan branch
+  of `fireWeapon`: while `shieldUp`, shots with `dot(shotDir, forward) < -0.4` (≈±66° front
+  cone) are blocked — spark burst + new `sfx.clink`, no damage/hit-stat/ricochet. Rocket splash
+  ×0.5 vs raised shield (per spec), full when down. New `sfx.charge` (low saw rise + noise).
+  Minimap dot `#ff7a1a`, radius 3.4 (bigger than regulars).
+- Tuning chosen: turn cap 1.8 rad/s makes flanking real — sprint-strafe out-turns it inside
+  ~7 units, dash always does. Charge locks at wind-up end (not start) so the 1 s telegraph is
+  the dodge window; a sidestep after the lock whiffs it cleanly. Dash i-frames negate charge
+  contact damage but still end the charge (stagger), so phasing through is a safe shield-opener.
+  Splash-type damage other than rockets (chain lightning, volatile, exploder blasts, nova, dash
+  trail) deliberately ignores the shield — only aimed fire respects facing; spec only names
+  rockets and the epics stay consistent with items 7–11.
+- Notes for next sessions: verified via headless-Chrome playtest (38 checks: wave gate,
+  stats/geo-sharing/plate/core placement, block-cone unit tests incl. −0.4 threshold, live
+  blaster fire front/side/back-crit/staggered-front with clink spy, rocket halving exactness,
+  walk speed + no free spin, turn-cap flank, full traced cycle with durations
+  windup 1.00 s / charge 0.92 s / stagger ~1.5 s, lock accuracy dot≈1, whiff dodge, exact 25
+  contact + shove, i-frame negate, wall slam early-stagger, minimap pixel, kill/dispose/respawn,
+  reset mid-charge, real-roll waves 5–7 + die + restart + 1 wave, no console errors). Perf A/B
+  on fresh pages (session-12 lesson): 23 enemies + boss + shotgun spam, 5 bulwarks vs 5 chasers
+  = 26.4 vs 28.0 avg FPS (swiftshader) — within run noise, no per-entity lights added. Harness
+  gotchas added this session: auto-play integration must NOT kill bulwarks before their first
+  stagger or charge is never observed; probe/tracer races — snapshot transition logs ~100 ms
+  after the state flips, and measure charge-lock accuracy inside the probe before dodging.
+  Item 16's SHIELDED elite modifier is a flat damage reduction — unrelated to this directional
+  shield; don't merge them. No new controls → no touch work.
 
 ### 2026-07-10 — Item 12: Flying enemy — WASP — done
 - What landed: `wasp` enemy type (wave 4+, chance `min(0.25, 0.08 + wave*0.02)` rolled after
