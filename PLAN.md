@@ -16,7 +16,7 @@ close out with a Session Log entry at the bottom of this file.
 | 6  | Upgrade rarity + reroll       | 2     | done   | 0df5187 |
 | 7  | Ricochet rounds               | 2     | done   | aa0f610 |
 | 8  | Chain lightning on crit       | 2     | done   | b1e5ecd |
-| 9  | Kill clip                     | 2     | todo   | needs 6 |
+| 9  | Kill clip                     | 2     | done   |        |
 | 10 | Dash trail damage             | 2     | todo   | needs 6 |
 | 11 | Volatile deaths               | 2     | todo   | needs 6 |
 | 12 | Flying enemy — WASP           | 3     | todo   |        |
@@ -118,7 +118,7 @@ Item 16 (elite modifiers) benefits from 12–14 (more enemy types to modify) but
 **Sketch:** `mods.chainCrit = false`. On crit: pick up to 2 nearest enemies within 12 units, deal 25 flat (scaled by `mods.damage`), draw jagged tracer (2–3 segment polyline — extend tracer pool to support 4-point buffers or spawn 2–3 pooled 2-point tracers with a midpoint jitter). Add `sfx.zap` (high sine slide). Guard against recursion: chained damage must not itself trigger chains (pass a flag through `damageEnemy`).
 **Done when:** arcs render jagged and cyan-white, no infinite recursion with DEADEYE + shotgun multi-crits, chain kills award combo normally.
 
-### [ ] 9. Kill clip (rare upgrade)
+### [x] 9. Kill clip (rare upgrade)
 **Goal:** Kills refund 15% of magazine size to the current weapon (rounded up).
 **Hook points:** `killEnemy`, `mods`, `updateAmmoUI`.
 **Sketch:** `mods.killClip = false`. In `killEnemy`: `w.mag = Math.min(w.magSize, w.mag + Math.ceil(w.magSize * 0.15))`, flash the ammo counter (brief CSS class with cyan glow). Applies to the *held* weapon regardless of what dealt the kill — simpler and feels generous.
@@ -236,6 +236,29 @@ Append one entry per completed (or abandoned) session, newest first. Format:
 ```
 
 If an item is left `wip`, the entry MUST say exactly what remains and where the work stopped.
+
+### 2026-07-10 — Item 9: Kill clip — done
+- What landed: `mods.killClip` (in `baseMods()`, resets per run) + KILL CLIP rare in `UPGRADES`
+  (reuses the `avail: () => !mods.killClip` one-shot pattern from items 7/8). `killEnemy` calls
+  new `killClipRefund()` (defined next to `finishReload`): held weapon `W()` gets
+  `mag = min(magSize, mag + ceil(magSize * 0.15))` — blaster +5, shotgun +2, rocket +1;
+  scales with EXTENDED MAGS (magSize 39 → +6) since it reads live `magSize`. HUD flash =
+  `.clip` class on `#ammo` (bright cyan + white glow, applied instantly, removed after 180 ms,
+  fades back over the new 0.3 s color/text-shadow transition on `#ammo`).
+- Tuning chosen: mid-reload decision (spec said pick one): the refund APPLIES during a reload —
+  `finishReload` computes `need = magSize - mag` at finish time, so it just tops up less from
+  reserve (e.g. shotgun 2/10 reloading + kill → 4, finish → 10/18 reserve instead of 10/16) —
+  no corruption possible. No flash during reload (counter reads RELOAD…; `updateAmmoUI`
+  early-returns anyway). Full mag = silent no-op, no flash. `resetGame` clears the flash timer
+  + class alongside `reloading = false`.
+- Notes for next sessions: verified via headless-Chrome playtest (23 checks: pool presence +
+  ownership filtering, exact ceil math for all 3 weapons, mag cap, full-mag no-op, refund goes
+  to HELD weapon only regardless of what dealt the kill, EXTENDED MAGS scaling, mid-reload
+  apply + clean finishReload reserve math, full `damageEnemy` kill path, upgrade-off no-op,
+  reset clears mod/class/re-enables the card, 3 waves + die + restart + 1 wave, 41.3 FPS
+  swiftshader, favicon-only 404s). Test-harness gotcha: the 180 ms `.clip` flash from one check
+  leaks into the next check's "no flash" assertion — sleep 250 ms + remove the class between
+  flash-sensitive checks. No new controls → no touch work.
 
 ### 2026-07-09 — Item 8: Chain lightning on crit — done
 - What landed: `mods.chainCrit` (in `baseMods()`, resets per run) + CHAIN LIGHTNING epic in

@@ -44,9 +44,11 @@
   #ammowrap { position:absolute; bottom: 28px; right: 28px; text-align:right; }
   #weaponname { font-size: 13px; letter-spacing:2px; color:#fff; text-shadow:0 0 10px var(--neon); margin-bottom:2px;}
   #ammolabel { font-size: 11px; color:#9fe9ff; letter-spacing:2px; text-shadow:0 0 8px var(--neon); }
-  #ammo { font-size: 34px; font-weight:800; color:#fff; text-shadow:0 0 12px var(--neon); }
+  #ammo { font-size: 34px; font-weight:800; color:#fff; text-shadow:0 0 12px var(--neon);
+          transition: color .3s ease, text-shadow .3s ease; }
   #ammo small { font-size:18px; color:#7fbfd6; }
   #ammo.reloading { color:#ffd27a; text-shadow:0 0 12px #ffd27a; font-size:20px; }
+  #ammo.clip { color:#8ffcff; text-shadow:0 0 22px var(--neon), 0 0 8px #fff; transition:none; }
   #weaponslots { display:flex; gap:6px; justify-content:flex-end; margin-top:6px; }
   .wslot { font-size:10px; letter-spacing:1px; color:#6f93a6; border:1px solid rgba(0,240,255,.2);
            padding:3px 7px; border-radius:6px; }
@@ -567,7 +569,7 @@ let reloading = false, reloadTimer = 0, lastShot = 0, gunRecoil = 0;
 // ===========================================================================
 const baseMods = () => ({ damage: 1, fireRate: 1, reload: 1, speed: 1, mag: 1,
                           dashCD: 3.2, crit: 2, splash: 1, lifesteal: 0, ricochet: false,
-                          chainCrit: false });
+                          chainCrit: false, killClip: false });
 let mods = baseMods();
 let dashCD = 0;
 function applyMagMod() { weapons.forEach(w => { w.magSize = Math.round(w.baseMag * mods.mag); }); }
@@ -583,6 +585,7 @@ const UPGRADES = [
   { name: 'PHASE COILS',   rarity: 'rare',   desc: '-20% dash cooldown',                 apply: () => mods.dashCD *= 0.8 },
   { name: 'DEADEYE',       rarity: 'rare',   desc: 'Core hits deal +50% extra damage',   apply: () => mods.crit += 0.5 },
   { name: 'PAYLOAD',       rarity: 'rare',   desc: '+25% rocket blast radius',           apply: () => mods.splash *= 1.25 },
+  { name: 'KILL CLIP',     rarity: 'rare',   desc: 'Kills refund 15% of your magazine', apply: () => mods.killClip = true, avail: () => !mods.killClip },
   { name: 'RICOCHET ROUNDS', rarity: 'epic', desc: 'Blaster hits bounce to a nearby enemy for 50% damage', apply: () => mods.ricochet = true, avail: () => !mods.ricochet },
   { name: 'CHAIN LIGHTNING', rarity: 'epic', desc: 'Crits arc lightning to 2 nearby enemies', apply: () => mods.chainCrit = true, avail: () => !mods.chainCrit },
 ];
@@ -665,6 +668,19 @@ function finishReload() {
   if (w.reserve === Infinity) { w.mag = w.magSize; }
   else { const need = w.magSize - w.mag; const take = Math.min(need, w.reserve); w.mag += take; w.reserve -= take; }
   reloading = false; setReloadUI(false); updateAmmoUI();
+}
+let clipFlashTO;
+function killClipRefund() {
+  const w = W();
+  if (w.mag >= w.magSize) return;
+  w.mag = Math.min(w.magSize, w.mag + Math.ceil(w.magSize * 0.15));
+  // Mid-reload the refund still applies; finishReload tops up from the new mag
+  // value (need shrinks), so no flash — the counter reads RELOAD… until then.
+  if (reloading) return;
+  updateAmmoUI();
+  ui.ammo.classList.add('clip');
+  clearTimeout(clipFlashTO);
+  clipFlashTO = setTimeout(() => ui.ammo.classList.remove('clip'), 180);
 }
 
 // ===========================================================================
@@ -1139,6 +1155,7 @@ function killEnemy(enemy, kw, kdist) {
     updateUltUI();
   }
   if (mods.lifesteal > 0) { player.hp = Math.min(player.maxHp, player.hp + mods.lifesteal); updateHealthUI(); }
+  if (mods.killClip) killClipRefund();
   const gained = (isBoss ? 1000 : 100) * state.combo; state.score += gained;
   // Style bonuses — flat additions, only on direct player hits (kw is null for splash/chain).
   if (kw) {
@@ -1803,6 +1820,7 @@ function resetGame() {
   weapons[1].mag = weapons[1].magSize; weapons[1].reserve = 24;
   weapons[2].mag = weapons[2].magSize; weapons[2].reserve = 8;
   currentWeapon = 0; reloading = false; gunGlow.material.color.setHex(weapons[0].color);
+  clearTimeout(clipFlashTO); ui.ammo.classList.remove('clip');
 
   state.score = 0; state.wave = 0; state.combo = 1; state.comboTimer = 0;
   state.toSpawn = 0; state.betweenWaves = 0; state.pickupTimer = 8; state.shake = 0;
