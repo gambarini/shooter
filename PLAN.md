@@ -17,7 +17,7 @@ close out with a Session Log entry at the bottom of this file.
 | 7  | Ricochet rounds               | 2     | done   | aa0f610 |
 | 8  | Chain lightning on crit       | 2     | done   | b1e5ecd |
 | 9  | Kill clip                     | 2     | done   | 1cb3020 |
-| 10 | Dash trail damage             | 2     | done   |        |
+| 10 | Dash trail damage             | 2     | done   | b9d1f88 |
 | 11 | Volatile deaths               | 2     | todo   | needs 6 |
 | 12 | Flying enemy — WASP           | 3     | todo   |        |
 | 13 | Shielded tank — BULWARK       | 3     | todo   |        |
