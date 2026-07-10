@@ -19,7 +19,7 @@ close out with a Session Log entry at the bottom of this file.
 | 9  | Kill clip                     | 2     | done   | 1cb3020 |
 | 10 | Dash trail damage             | 2     | done   | b9d1f88 |
 | 11 | Volatile deaths               | 2     | done   | 2da8e82 |
-| 12 | Flying enemy — WASP           | 3     | todo   |        |
+| 12 | Flying enemy — WASP           | 3     | done   |        |
 | 13 | Shielded tank — BULWARK       | 3     | todo   |        |
 | 14 | Splitter enemy                | 3     | todo   |        |
 | 15 | Boss phases                   | 3     | todo   |        |
@@ -140,7 +140,7 @@ Item 16 (elite modifiers) benefits from 12–14 (more enemy types to modify) but
 
 ## Phase 3 — Enemy & boss variety
 
-### [ ] 12. Flying enemy — WASP
+### [x] 12. Flying enemy — WASP
 **Goal:** A hovering enemy that circles at height ~6–9 then telegraphs and dive-bombs the player.
 **Hook points:** `spawnEnemy` (new type branch), enemy loop in `update` (new movement case), minimap (new color), `disposeEnemy` works as-is if built like others.
 **Sketch:** Geometry: small cone or squashed icosahedron, color `#3af0ff`-ish (distinct from all current hues). Appears wave 4+. States: `orbit` (circle player at radius ~14, height 7, bob) → every 4–6 s `telegraph` (0.6 s, flash bright + `sfx.warn`) → `dive` (straight line at player's position captured at telegraph end, fast) → on floor/whiff or hit (12 dmg), climb back to orbit. Vertical position means hitscan already works (raycast is 3D); melee-contact check must use full 3D distance for this type.
@@ -236,6 +236,34 @@ Append one entry per completed (or abandoned) session, newest first. Format:
 ```
 
 If an item is left `wip`, the entry MUST say exactly what remains and where the work stopped.
+
+### 2026-07-10 — Item 12: Flying enemy — WASP — done
+- What landed: `wasp` enemy type (wave 4+, chance `min(0.25, 0.08 + wave*0.02)` rolled after
+  shooter/exploder), shared `waspGeo` cone (0.85×1.5, 6 sides, in `SHARED_ENEMY_GEO`), hue
+  `0x3af0ff`, hp `35 + wave*8`, radius 0.9. State machine in the enemy loop: `orbit` (ring
+  radius 14 around the player, per-wasp `hoverH` 6–9, next-dive timer 4–6 s) → `telegraph`
+  (0.6 s, emissive flash + `sfx.warn`) → `dive` (26 u/s straight at the player position locked
+  at telegraph END, stinger oriented along the dive via quaternion; 12 contact dmg on full-3D
+  distance, floor/pillar/1.4 s-timeout = whiff burst) → `climb` (8 u/s back to `hoverH`, re-seed
+  orbit angle from actual bearing). New `sfx.dive` (sawtooth 1500→220). Minimap dot `#3af0ff`.
+  New `collideWasp`: arena X/Z clamp always, pillar push-out only when below the pillar top,
+  and a push while diving converts to climb.
+- Tuning chosen: orbit target re-derives `orbitAngle` from the wasp's actual bearing each frame
+  (nearest ring point nudged ahead) — a blindly-advancing angle made far-away wasps spiral in
+  and settle at radius ~9 instead of ~14. Orbit chase speed = `speed*1.7` so it tracks a moving
+  player. Two cross-type guards added: the separation pass skips pairs with |Δy| > 2.5 (a wasp
+  overhead no longer shoves ground units), and both AFTERBURN dash-trail checks skip enemies
+  above y 3.5 (ground trail can't hit orbiting wasps; diving wasps below that ARE hittable).
+- Notes for next sessions: verified via headless-Chrome playtest (48 checks: spawn shape/hue/
+  shared-geo/lane, orbit hold + radius + circling, telegraph timing/flash/warn, dive lock dir +
+  exact 12 dmg + climb, whiff dodge + never-below-floor, dash-i-frame negate, fly-over vs push-out
+  vs dive-whiff on pillars, 3D hitscan hit, minimap pixel color, separation guard both ways,
+  trail high-miss/low-hit, kill/reset/respawn, 4 waves + die + restart + 1 wave real rolls,
+  no console errors; screenshot of 3 orbiting wasps). Perf: FPS must be measured on a FRESH page
+  — same-page measurement right after the integration run read 9–12 FPS while a clean A/B read
+  baseline 39.6 vs wasp-build 39.7/39.8 (23 enemies, 10 wasps, swiftshader 1280×800): zero
+  regression. Boss-wave wasps come free (same spawn roll). Item 13's BULWARK must NOT reuse the
+  free-spin block — it needs yaw-facing (see its spec). No new controls → no touch work.
 
 ### 2026-07-10 — Item 11: Volatile deaths — done
 - What landed: `mods.volatile` (in `baseMods()`) + VOLATILE epic in `UPGRADES` (item-7 `avail`
