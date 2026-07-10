@@ -21,7 +21,7 @@ close out with a Session Log entry at the bottom of this file.
 | 11 | Volatile deaths               | 2     | done   | 2da8e82 |
 | 12 | Flying enemy — WASP           | 3     | done   | 7c5700d |
 | 13 | Shielded tank — BULWARK       | 3     | done   | cd297f2 |
-| 14 | Splitter enemy                | 3     | todo   |        |
+| 14 | Splitter enemy                | 3     | done   |        |
 | 15 | Boss phases                   | 3     | todo   |        |
 | 16 | Elite enemy modifiers         | 3     | todo   |        |
 | 17 | Arena hazard — laser sweep    | 4     | todo   |        |
@@ -152,7 +152,7 @@ Item 16 (elite modifiers) benefits from 12–14 (more enemy types to modify) but
 **Sketch:** Big box/slab body, dark with orange emissive; a visibly distinct shield plate child mesh on the front face. Appears wave 5+. Always faces the player (rotate mesh yaw toward player — note other enemies spin freely; this one must not). Shield check: on hit, compare hit direction vs enemy facing (`dot(shotDir, enemyForward) < -0.4` → blocked: spark burst, `sfx` clink, no damage). Every ~5 s: 1 s wind-up telegraph then a fast charge in a straight line (heavy contact damage 25); for 1.5 s after the charge ends the shield drops (visual: plate swings open / emissive off).
 **Done when:** flanking works reliably, crit core reachable from behind, charge is telegraphed and dodgeable, shield blocks show clear feedback so players learn the rule without text.
 
-### [ ] 14. Splitter enemy
+### [x] 14. Splitter enemy
 **Goal:** Medium enemy that splits into 2–3 fast mini-chasers on death.
 **Hook points:** `spawnEnemy`, `killEnemy` (spawn children on death), enemy loop (minis are just small fast chasers).
 **Sketch:** Bigger icosahedron (scale ~1.5), teal/green two-tone. Appears wave 4+. On death: spawn 2–3 `chaser`-type enemies at 0.55 scale, hp ~15, speed ~9, radius ~0.7, tiny score (25). Children spawn slightly separated (use the separation pass to settle). Children must NOT be counted in `state.toSpawn` (they come from deaths) — wave-clear logic (`nextWaveCheck`) already keys off `enemies.length` so it just works; verify.
@@ -236,6 +236,41 @@ Append one entry per completed (or abandoned) session, newest first. Format:
 ```
 
 If an item is left `wip`, the entry MUST say exactly what remains and where the work stopped.
+
+### 2026-07-10 — Item 14: Splitter enemy — done
+- What landed: `splitter` enemy type (wave 4+, chance `min(0.22, 0.06 + wave*0.02)` rolled after
+  shooter/exploder/wasp/bulwark), shared `splitterGeo` icosahedron 1.65 (≈ chaser × 1.5) +
+  `miniGeo` 0.6, both in `SHARED_ENEMY_GEO` — dedicated geos, NOT scaled chaserGeo, because the
+  damage-flash writes `mesh.scale` directly. Two-tone: teal hull `0x1fffc3` + exploder-green
+  core `0x8aff3a` (hints "something inside"). hp `70 + wave*12`, speed `4.6*boost`, radius 1.5,
+  y 1.9, contact 12. Movement/contact reuse the chaser paths untouched. On death (in `killEnemy`,
+  after the pickup block): teal burst + new `sfx.split` (two rising square blips + noise) +
+  2–3 `spawnMini` children — type `'chaser'` with `mini: true`, flat hp 15 (one blaster shot at
+  ANY wave), speed 8.5–10, radius 0.7, y 1.0, contact 8, score 25, radially scattered 1.4 units
+  (separation pass settles them, `collideArena` clamps). New `scoreVal` field on all enemies
+  (splitter 150, mini 25, default 100) replaces the hardcoded 100 in `killEnemy`. Minimap: teal
+  dots, splitter 3.2 / mini 1.8.
+- Tuning chosen: children spawn LAST in `killEnemy` — after the volatile/exploder blast blocks —
+  so a volatile roll on the splitter can't wipe the brood the frame it exists, and blast
+  snapshots (`[...enemies]`) taken by nova/exploder/volatile before the kill never contain the
+  children (verified: exploder-chain and nova kills both leave minis at full 15 hp). Splitter hp
+  70 (spec had none): dies to ~2 blaster bursts, tanky enough to reach mid-range. Mini contact
+  lowered to 8 (vs chaser 12) — a 3-pack alpha-strike at 36 felt unfair for a "reward" spawn.
+- Notes for next sessions: verified via headless-Chrome playtest (37 checks: wave gate 3/4,
+  stats/geo-sharing/two-tone, split count {2,3} over 60 kills, mini stats + placement, sfx spy,
+  scoreVal math incl. combo (kill at combo N scores val×(N+1)), real one-shot blaster kill,
+  wave keeps running while minis live then clears, volatile-ordering with damage witness,
+  exploder-chain kill → exactly 2 kills tallied, nova, contact 8/12, pursuit speed + bob band,
+  minimap pixels, reset + respawn, live run waves 1→6 with real rolls + die + restart + 1 wave,
+  29 FPS swiftshader at 33 enemies incl. brood + shotgun spam, no console errors). NEW HARNESS
+  TRAP that burned this session: a stale `python3 -m http.server` from a PREVIOUS session still
+  owned port 8123 and served the old scratch copy (which had its own `__dbg`, so nothing
+  obviously failed — tests just ran against last session's build). Check `lsof -iTCP:<port>`
+  or use a fresh port, and kill the server when done (this session's 8124 was killed).
+  Blast falloffs use 3D `distanceTo` — position damage witnesses at the same y. Item 16
+  (elites): exclude minis from the elite roll (they come from deaths, not `spawnEnemy`, so
+  it's structural — but if elite splitters are allowed, consider whether the brood inherits).
+  No new controls → no touch work.
 
 ### 2026-07-10 — Item 13: Shielded tank — BULWARK — done
 - What landed: `bulwark` enemy type (wave 5+, chance `min(0.18, 0.05 + wave*0.015)` rolled after
