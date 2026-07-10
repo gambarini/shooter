@@ -17,7 +17,7 @@ close out with a Session Log entry at the bottom of this file.
 | 7  | Ricochet rounds               | 2     | done   | aa0f610 |
 | 8  | Chain lightning on crit       | 2     | done   | b1e5ecd |
 | 9  | Kill clip                     | 2     | done   | 1cb3020 |
-| 10 | Dash trail damage             | 2     | todo   | needs 6 |
+| 10 | Dash trail damage             | 2     | done   |        |
 | 11 | Volatile deaths               | 2     | todo   | needs 6 |
 | 12 | Flying enemy — WASP           | 3     | todo   |        |
 | 13 | Shielded tank — BULWARK       | 3     | todo   |        |
@@ -124,7 +124,7 @@ Item 16 (elite modifiers) benefits from 12–14 (more enemy types to modify) but
 **Sketch:** `mods.killClip = false`. In `killEnemy`: `w.mag = Math.min(w.magSize, w.mag + Math.ceil(w.magSize * 0.15))`, flash the ammo counter (brief CSS class with cyan glow). Applies to the *held* weapon regardless of what dealt the kill — simpler and feels generous.
 **Done when:** refund visible in HUD, respects mag cap, works mid-reload without corrupting reload state (either cancel refund during reload or let it apply after — pick one and note it).
 
-### [ ] 10. Dash trail damage (rare upgrade)
+### [x] 10. Dash trail damage (rare upgrade)
 **Goal:** Dashing leaves a short-lived energy trail that damages enemies it touches; dashing through an enemy damages it.
 **Hook points:** dash activation block in `update` (`wantDash`), `mods`, enemy loop for overlap tests, `resetGame`.
 **Sketch:** `mods.dashDamage = false`. On dash: record trail as 3–4 pooled glowing quads (or stretched boxes) along the dash path, life 0.8 s. Each enemy overlapping a trail segment (2D distance < 1.5) takes 40 damage once per dash (tag enemies with the dash id). Direct pass-through (player within enemy radius during i-frames) also counts.
@@ -236,6 +236,36 @@ Append one entry per completed (or abandoned) session, newest first. Format:
 ```
 
 If an item is left `wip`, the entry MUST say exactly what remains and where the work stopped.
+
+### 2026-07-10 — Item 10: Dash trail damage — done
+- What landed: `mods.dashDamage` (in `baseMods()`) + AFTERBURN rare in `UPGRADES` (item-7 `avail`
+  pattern). Dash activation arms `dashId++` / `dashTrailT = 0.3` (matches the i-frame window);
+  a block in `update` right after the player's `collideArena` drops pooled stretched-box segments
+  (`trailSegs`/`trailSegPool`, shared `TRAIL_GEO`, per-segment material for the opacity fade,
+  cyan `0x7df9ff`, y=1.1, life 0.8 s) every `TRAIL_SPACING = 0.7` units of *actual post-collision*
+  travel, plus a final partial segment. Damage: enemy within `1.5 + e.radius * 0.5` (2D
+  point-to-segment) of any live segment, or within contact range of the player while the window
+  is open (pass-through — covers zero-travel dashes into walls), takes `40 * mods.damage` once
+  per dash (`e._dashId` tag). `resetGame` recycles segments + zeroes the window.
+- Tuning chosen: spacing 0.7, not the spec's "3–4 quads" at ~2.2 — a standstill dash only covers
+  ~2 units (velocity lerps to 0 at accel 14/s, ≈34/14), ~4.5 moving, so 0.7 gives 3–6 quads.
+  Damage scales with `mods.damage` (spec said flat 40) for consistency with ricochet/chain.
+  Item-4's PHASE KILL hook resolved: trail kills pass pseudo-kw `TRAIL_KW = {name:'PHASE TRAIL'}`
+  only while `player.invuln > 0`, so dash-window kills earn PHASE KILL +200 (and AIRSHOT if
+  airborne); lingering-trail kills pass kw=null → combo/score only, no style. A lingering trail
+  can never straddle two dashes (min dashCD ≈ 2 s with stacked PHASE COILS > 0.8 s life), so the
+  single global `dashId` tag is safe.
+- Notes for next sessions: verified via headless-Chrome playtest (26 checks: def/avail, off-by-
+  default no-op, 3+ segments covering the path, exact single 40 tick per dash incl. re-dash,
+  mods.damage scaling, out-of-range no-op, wall-dash pass-through, trail-kill combo/score/
+  PHASE KILL, lingering kill without style, mid-dash reset, 3 waves + die + restart + 1 wave,
+  56 FPS swiftshader, no console errors). New harness gotchas: the async pointer-lock re-pause
+  needs a `setInterval(() => state.paused = false, 25)` — a one-shot unpause in the same evaluate
+  loses the race; and killing the last enemy freezes `update` via the upgrade overlay
+  (`state.choosing`) — keep a far-away dummy alive (or treat `choosing` as settled) before
+  waiting on trail expiry. Player spawn area has a central obstacle: tests that reposition the
+  player must scan `obstacles` for a clear lane or `collideArena` teleports the player. No new
+  controls → existing DASH touch button covers it.
 
 ### 2026-07-10 — Item 9: Kill clip — done
 - What landed: `mods.killClip` (in `baseMods()`, resets per run) + KILL CLIP rare in `UPGRADES`

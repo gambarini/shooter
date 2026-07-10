@@ -569,7 +569,7 @@ let reloading = false, reloadTimer = 0, lastShot = 0, gunRecoil = 0;
 // ===========================================================================
 const baseMods = () => ({ damage: 1, fireRate: 1, reload: 1, speed: 1, mag: 1,
                           dashCD: 3.2, crit: 2, splash: 1, lifesteal: 0, ricochet: false,
-                          chainCrit: false, killClip: false });
+                          chainCrit: false, killClip: false, dashDamage: false });
 let mods = baseMods();
 let dashCD = 0;
 function applyMagMod() { weapons.forEach(w => { w.magSize = Math.round(w.baseMag * mods.mag); }); }
@@ -586,6 +586,7 @@ const UPGRADES = [
   { name: 'DEADEYE',       rarity: 'rare',   desc: 'Core hits deal +50% extra damage',   apply: () => mods.crit += 0.5 },
   { name: 'PAYLOAD',       rarity: 'rare',   desc: '+25% rocket blast radius',           apply: () => mods.splash *= 1.25 },
   { name: 'KILL CLIP',     rarity: 'rare',   desc: 'Kills refund 15% of your magazine', apply: () => mods.killClip = true, avail: () => !mods.killClip },
+  { name: 'AFTERBURN',     rarity: 'rare',   desc: 'Dashing leaves a damaging energy trail', apply: () => mods.dashDamage = true, avail: () => !mods.dashDamage },
   { name: 'RICOCHET ROUNDS', rarity: 'epic', desc: 'Blaster hits bounce to a nearby enemy for 50% damage', apply: () => mods.ricochet = true, avail: () => !mods.ricochet },
   { name: 'CHAIN LIGHTNING', rarity: 'epic', desc: 'Crits arc lightning to 2 nearby enemies', apply: () => mods.chainCrit = true, avail: () => !mods.chainCrit },
 ];
@@ -763,6 +764,36 @@ function spawnDamageNumber(pos, dmg, crit) {
   scene.add(s);
   dmgNumbers.push({ sprite: s, life: 0.6 });
 }
+// Dash trail (AFTERBURN) — pooled stretched boxes dropped along the dash path.
+// Each segment keeps its own material (opacity fades per segment); geometry is shared.
+const trailSegs = [], trailSegPool = [];
+const TRAIL_GEO = new THREE.BoxGeometry(1, 1, 1);
+const TRAIL_DMG = 40, TRAIL_LIFE = 0.8, TRAIL_SPACING = 0.7, TRAIL_HIT_R = 1.5;
+const TRAIL_KW = { name: 'PHASE TRAIL' };  // kill-credit tag so trail kills can earn style bonuses
+let dashId = 0, dashTrailT = 0, trailLastX = 0, trailLastZ = 0;
+function spawnTrailSeg(ax, az, bx, bz) {
+  let m = trailSegPool.pop();
+  if (!m) {
+    m = new THREE.Mesh(TRAIL_GEO, new THREE.MeshBasicMaterial({ color: 0x7df9ff, transparent: true, depthWrite: false }));
+    m.frustumCulled = false;
+  }
+  const dx = bx - ax, dz = bz - az;
+  m.position.set((ax + bx) / 2, 1.1, (az + bz) / 2);
+  m.rotation.y = Math.atan2(dx, dz);
+  m.scale.set(0.16, 1.7, Math.max(0.5, Math.hypot(dx, dz)));
+  m.material.opacity = 0.55;
+  m.visible = true;
+  scene.add(m);
+  trailSegs.push({ mesh: m, ax, az, bx, bz, life: TRAIL_LIFE });
+}
+function freeTrailSeg(s) { scene.remove(s.mesh); s.mesh.visible = false; trailSegPool.push(s.mesh); }
+// 2D point-to-segment distance (enemy centre vs a trail piece).
+function segDist2D(px, pz, ax, az, bx, bz) {
+  const abx = bx - ax, abz = bz - az;
+  const t = Math.max(0, Math.min(1, ((px - ax) * abx + (pz - az) * abz) / (abx * abx + abz * abz || 1)));
+  return Math.hypot(px - (ax + abx * t), pz - (az + abz * t));
+}
+
 // Projectiles are pooled with shared geometry/material — point lights are expensive
 // (every light multiplies fragment cost of all lit materials), so only rockets keep
 // one: their count is bounded by ammo, unlike enemy shots at high waves.
@@ -1361,6 +1392,10 @@ function update(dt) {
       ui.dashFill.style.width = '0%';
       sfx.dash();
       state.shake = Math.min(0.4, state.shake + 0.08);
+      if (mods.dashDamage) {
+        dashId++; dashTrailT = 0.3;   // matches the dash i-frame window
+        trailLastX = player.pos.x; trailLastZ = player.pos.z;
+      }
     }
   }
 
@@ -1387,6 +1422,39 @@ function update(dt) {
   player.pos.y += player.vel.y * dt;
   if (player.pos.y <= EYE) { player.pos.y = EYE; player.vel.y = 0; player.onGround = true; }
   collideArena(player.pos, player.radius);
+
+  // ----- dash trail (AFTERBURN) -----
+  if (dashTrailT > 0) {
+    dashTrailT -= dt;
+    const mdx = player.pos.x - trailLastX, mdz = player.pos.z - trailLastZ;
+    const moved = Math.hypot(mdx, mdz);
+    // drop a segment every TRAIL_SPACING units, plus a final partial one when the dash ends
+    if (moved >= TRAIL_SPACING || (dashTrailT <= 0 && moved > 0.6)) {
+      spawnTrailSeg(trailLastX, trailLastZ, player.pos.x, player.pos.z);
+      trailLastX = player.pos.x; trailLastZ = player.pos.z;
+    }
+    // direct pass-through counts before any segment has dropped (kills can splice → copy)
+    for (const e of [...enemies]) {
+      if (e._dashId === dashId) continue;
+      if (Math.hypot(e.mesh.position.x - player.pos.x, e.mesh.position.z - player.pos.z) < e.radius + player.radius + 0.3) {
+        e._dashId = dashId;
+        damageEnemy(e, TRAIL_DMG * mods.damage, null, false, TRAIL_KW);
+      }
+    }
+  }
+  for (let i = trailSegs.length - 1; i >= 0; i--) {
+    const s = trailSegs[i]; s.life -= dt;
+    if (s.life <= 0) { freeTrailSeg(s); trailSegs.splice(i, 1); continue; }
+    s.mesh.material.opacity = 0.55 * (s.life / TRAIL_LIFE);
+    for (const e of [...enemies]) {
+      if (e._dashId === dashId) continue;
+      if (segDist2D(e.mesh.position.x, e.mesh.position.z, s.ax, s.az, s.bx, s.bz) < TRAIL_HIT_R + e.radius * 0.5) {
+        e._dashId = dashId;
+        // style-bonus credit only while the dash i-frames are live (lingering-trail kills stay plain)
+        damageEnemy(e, TRAIL_DMG * mods.damage, null, false, player.invuln > 0 ? TRAIL_KW : null);
+      }
+    }
+  }
 
   // ----- camera (with shake) -----
   state.shake = Math.max(0, state.shake - dt * 1.5);
@@ -1808,6 +1876,7 @@ function resetGame() {
   player.maxHp = 100; player.hp = 100; player.onGround = true; player.invuln = 0;
 
   mods = baseMods(); applyMagMod();
+  trailSegs.forEach(freeTrailSeg); trailSegs.length = 0; dashTrailT = 0;
   dashCD = 0; wantDash = false; lastShot = 0;
   ui.dashBar.classList.add('ready'); ui.dashFill.style.width = '100%';
   state.ult = 0; wantUlt = false; novaT = 0;
