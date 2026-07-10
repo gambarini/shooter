@@ -20,7 +20,7 @@ close out with a Session Log entry at the bottom of this file.
 | 10 | Dash trail damage             | 2     | done   | b9d1f88 |
 | 11 | Volatile deaths               | 2     | done   | 2da8e82 |
 | 12 | Flying enemy — WASP           | 3     | done   | 7c5700d |
-| 13 | Shielded tank — BULWARK       | 3     | done   |        |
+| 13 | Shielded tank — BULWARK       | 3     | done   | cd297f2 |
 | 14 | Splitter enemy                | 3     | todo   |        |
 | 15 | Boss phases                   | 3     | todo   |        |
 | 16 | Elite enemy modifiers         | 3     | todo   |        |
