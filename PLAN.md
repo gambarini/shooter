@@ -18,7 +18,7 @@ close out with a Session Log entry at the bottom of this file.
 | 8  | Chain lightning on crit       | 2     | done   | b1e5ecd |
 | 9  | Kill clip                     | 2     | done   | 1cb3020 |
 | 10 | Dash trail damage             | 2     | done   | b9d1f88 |
-| 11 | Volatile deaths               | 2     | todo   | needs 6 |
+| 11 | Volatile deaths               | 2     | wip    |        |
 | 12 | Flying enemy — WASP           | 3     | todo   |        |
 | 13 | Shielded tank — BULWARK       | 3     | todo   |        |
 | 14 | Splitter enemy                | 3     | todo   |        |
@@ -130,7 +130,7 @@ Item 16 (elite modifiers) benefits from 12–14 (more enemy types to modify) but
 **Sketch:** `mods.dashDamage = false`. On dash: record trail as 3–4 pooled glowing quads (or stretched boxes) along the dash path, life 0.8 s. Each enemy overlapping a trail segment (2D distance < 1.5) takes 40 damage once per dash (tag enemies with the dash id). Direct pass-through (player within enemy radius during i-frames) also counts.
 **Done when:** trail renders + fades, damage applies once per enemy per dash, pooled/reset correctly, kills via trail count for combo and PHASE KILL style bonus (item 4) if both present.
 
-### [ ] 11. Volatile deaths (epic upgrade)
+### [x] 11. Volatile deaths (epic upgrade)
 **Goal:** ~20% of kills explode like exploder detonations, damaging nearby enemies.
 **Hook points:** `killEnemy` — the exploder chain-explosion block already there is the template; `mods`.
 **Sketch:** `mods.volatile = false`. In `killEnemy`, for non-boss non-exploder kills: 20% chance → orange burst + `sfx.explode` + 35 damage falloff within 5 units to other enemies (reuse the exploder loop, iterate over a copy `[...enemies]`). Must not damage the player (it's a reward, not a hazard).
@@ -236,6 +236,31 @@ Append one entry per completed (or abandoned) session, newest first. Format:
 ```
 
 If an item is left `wip`, the entry MUST say exactly what remains and where the work stopped.
+
+### 2026-07-10 — Item 11: Volatile deaths — done
+- What landed: `mods.volatile` (in `baseMods()`) + VOLATILE epic in `UPGRADES` (item-7 `avail`
+  pattern). In `killEnemy`, an `else if` chained off the exploder-detonation block (so exploders
+  and bosses are excluded structurally): `mods.volatile && !isBoss && Math.random() < 0.2` →
+  orange burst (`0xff8c1a`, same 24/18/0.26 params as the green exploder one) + `sfx.explode` +
+  `35 * (1 - d/5) * mods.damage` to enemies within 5 units, iterating `[...enemies]`. Player is
+  never touched (no `damagePlayer` call). Splash passes `point=null`, `kw=null` → damage numbers
+  at the enemy mesh, combo/score awarded, no style bonuses — same as exploder chains.
+- Tuning chosen: damage scales with `mods.damage` (spec said flat 35) for consistency with
+  items 7/8/10. Bug found & fixed IN BOTH blast loops (volatile + the pre-existing exploder
+  template): the `[...enemies]` snapshot goes stale when a recursive cascade kills a later
+  entry — the outer loop then damaged the removed enemy again → second `killEnemy` on it
+  (double combo/score/kills/dispose; a 6-enemy volatile chain counted 10 kills). Guard is
+  `e.hp > 0` in both loops. The exploder fix is technically outside item scope but the spec's
+  "no array-mutation bugs in cascades" is unmeetable without it (volatile cascades route
+  through the exploder block when they kill one).
+- Notes for next sessions: verified via headless-Chrome playtest (24 checks: def/avail/draw
+  pool, off-by-default no-op, exact falloff at d=2/4, d≥5 no-op, mods.damage scaling,
+  roll ≥ 0.2 no-op, boss + exploder exclusion, exploder-chain 3-kill exactness, orange-particle
+  burst, player untouched at 1 unit, 6-enemy cascade = exactly 6 kills/combo 7/no error, reset +
+  redrawable, 3 waves + die + restart + 1 wave with real rolls, 39.7 FPS swiftshader, no
+  console errors with the URL-aware 404 filter). Harness note: rigging `Math.random` (to force
+  the 20% roll) also forces the 22% pickup drop in `killEnemy` — harmless, but rig/unrig
+  tightly around the kill. No new controls → no touch work.
 
 ### 2026-07-10 — Item 10: Dash trail damage — done
 - What landed: `mods.dashDamage` (in `baseMods()`) + AFTERBURN rare in `UPGRADES` (item-7 `avail`

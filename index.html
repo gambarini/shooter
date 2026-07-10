@@ -569,7 +569,7 @@ let reloading = false, reloadTimer = 0, lastShot = 0, gunRecoil = 0;
 // ===========================================================================
 const baseMods = () => ({ damage: 1, fireRate: 1, reload: 1, speed: 1, mag: 1,
                           dashCD: 3.2, crit: 2, splash: 1, lifesteal: 0, ricochet: false,
-                          chainCrit: false, killClip: false, dashDamage: false });
+                          chainCrit: false, killClip: false, dashDamage: false, volatile: false });
 let mods = baseMods();
 let dashCD = 0;
 function applyMagMod() { weapons.forEach(w => { w.magSize = Math.round(w.baseMag * mods.mag); }); }
@@ -589,6 +589,7 @@ const UPGRADES = [
   { name: 'AFTERBURN',     rarity: 'rare',   desc: 'Dashing leaves a damaging energy trail', apply: () => mods.dashDamage = true, avail: () => !mods.dashDamage },
   { name: 'RICOCHET ROUNDS', rarity: 'epic', desc: 'Blaster hits bounce to a nearby enemy for 50% damage', apply: () => mods.ricochet = true, avail: () => !mods.ricochet },
   { name: 'CHAIN LIGHTNING', rarity: 'epic', desc: 'Crits arc lightning to 2 nearby enemies', apply: () => mods.chainCrit = true, avail: () => !mods.chainCrit },
+  { name: 'VOLATILE',       rarity: 'epic',  desc: 'Kills have a 20% chance to explode, hurting nearby enemies', apply: () => mods.volatile = true, avail: () => !mods.volatile },
 ];
 let upgradeChoices = [];
 const upgradeEl = document.getElementById('upgrade');
@@ -1206,11 +1207,24 @@ function killEnemy(enemy, kw, kdist) {
   else if (STREAKS[state.combo]) flashCombo(`${STREAKS[state.combo]}  +${gained}`, '#ff8f3a');
   else if (state.combo > 1) flashCombo(`COMBO x${state.combo}  +${gained}`, '#ffd27a');
   // A shot-down exploder still detonates — against its own kind (chain potential).
+  // Both blast loops iterate a snapshot but must skip enemies a recursive
+  // cascade already killed (e.hp <= 0), or the stale reference gets a second
+  // killEnemy — double combo/score/dispose.
   if (enemy.type === 'exploder') {
     burst(enemy.mesh.position, 0x8aff3a, 24, 18, 0.26); sfx.explode();
     for (const e of [...enemies]) {
       const d = e.mesh.position.distanceTo(enemy.mesh.position);
-      if (d < 5) damageEnemy(e, 30 * (1 - d / 5), null);
+      if (d < 5 && e.hp > 0) damageEnemy(e, 30 * (1 - d / 5), null);
+    }
+  }
+  // Volatile deaths (upgrade): some kills detonate — orange (vs exploder green),
+  // enemy-only (never hurts the player). Cascades are safe: the dead enemy is
+  // already spliced out above, so recursion depth is bounded by enemies.length.
+  else if (mods.volatile && !isBoss && Math.random() < 0.2) {
+    burst(enemy.mesh.position, 0xff8c1a, 24, 18, 0.26); sfx.explode();
+    for (const e of [...enemies]) {
+      const d = e.mesh.position.distanceTo(enemy.mesh.position);
+      if (d < 5 && e.hp > 0) damageEnemy(e, 35 * (1 - d / 5) * mods.damage, null);
     }
   }
   if (isBoss) {
