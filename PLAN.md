@@ -24,10 +24,10 @@ close out with a Session Log entry at the bottom of this file.
 | 14 | Splitter enemy                | 3     | done   | 1a61931 |
 | 15 | Boss phases                   | 3     | done   | 9a28d5a |
 | 16 | Elite enemy modifiers         | 3     | done   | d00efea |
-| 17 | Arena hazard — laser sweep    | 4     | todo   |        |
-| 18 | Exploding barrels             | 4     | todo   |        |
-| 19 | Challenge waves (mutators)    | 4     | todo   |        |
-| 20 | Death recap & run summary     | 4     | todo   |        |
+| 17 | Challenge waves (mutators)    | 4     | done   |        |
+| 18 | Death recap & run summary     | 4     | todo   |        |
+| 19 | Arena hazard — laser sweep    | 4     | todo   |        |
+| 20 | Exploding barrels             | 4     | todo   |        |
 
 Status values: `todo` → `wip` → `done` (fill Commit with the short hash on completion).
 Keep this table AND the item checkbox in sync.
@@ -178,19 +178,7 @@ Store as `e.elite = 'SWIFT' | ...`. Show a small floating label? No DOM-per-enem
 
 ## Phase 4 — Run variety & retention
 
-### [ ] 17. Arena hazard — laser sweep
-**Goal:** From wave 6+, a rotating laser beam periodically sweeps the arena; touching it hurts.
-**Hook points:** `startWave` (arm the event), `update` (rotate + collision), `resetGame`, new scene objects (pooled/persistent, just hidden when inactive).
-**Sketch:** A tall emissive pillar at arena center (or one of the existing pillar tops) fires a horizontal beam (thin long box, red, with point light) that rotates 360° over ~8 s, once mid-wave with a 2 s warning (beam ghost at 20% opacity + `sfx.warn` beeps). Player collision: 2D line-segment vs player circle each frame while active, 15 dmg + knockback, 0.5 s per-hit cooldown. Enemies unaffected (it's a player-pressure tool) — OR damages enemies too for lure play; damaging enemies too is more fun: same falloff-free 15 dmg with per-enemy cooldown.
-**Done when:** warning gives fair reaction time, jump does NOT clear it (beam at torso height) but pillars block line-of-sight (skip damage if `segBlocked` between center and player), off during upgrades/pause, fully reset between runs.
-
-### [ ] 18. Exploding barrels
-**Goal:** Neon canisters scattered per wave; shooting one causes a rocket-sized explosion that damages everything nearby.
-**Hook points:** `startWave` (spawn 3–5 at random clear spots — reuse the placement loop from `spawnRandomPickup`), hitscan target list in `fireWeapon`, rocket proximity check, `explodeRocket`-style blast (extract a shared `explodeAt(pos, dmg, radius, hurtsPlayer)` helper), `resetGame`, minimap dots optional.
-**Sketch:** Cylinder mesh, dark body + yellow emissive band + point light. 1 HP (any hit detonates). Blast: 60 dmg falloff over 6 units to enemies AND player (risk/reward). Chain reactions between barrels (delayed 0.15 s per hop for readability). Cap ~6 alive.
-**Done when:** barrels join the hitscan target list and rocket/enemy-shot? (enemy shots should NOT detonate them — player-only trigger keeps it strategic; document the choice), chains feel readable, disposed on reset, luring exploder/chaser packs into barrels works.
-
-### [ ] 19. Challenge waves (mutators)
+### [x] 17. Challenge waves (mutators)
 **Goal:** Every 7th wave is a named mutator wave with a banner and bonus score.
 **Hook points:** `startWave` (roll + apply mutator), `update`/spawn logic (mutator effects), `killEnemy` (score multiplier), wave-clear (revert mutator).
 **Sketch:** `state.mutator = null | {...}`. On wave % 7 === 0 pick one:
@@ -201,11 +189,23 @@ Store as `e.elite = 'SWIFT' | ...`. Show a small floating label? No DOM-per-enem
 Banner via `flashCombo` with distinct color + `sfx.wave` variant. Revert everything in the wave-clear path AND in `gameOver`/`resetGame` (mutators must never leak across waves/runs).
 **Done when:** each mutator is clearly announced, score bonus applies only during the wave, no mutator state leaks (check death mid-mutator → restart), boss waves (multiples of 5) never collide with mutator waves (7, 14, 21, 28... vs 5, 10, 15... — wave 35 collides: mutator skips if boss wave).
 
-### [ ] 20. Death recap & run summary
+### [ ] 18. Death recap & run summary
 **Goal:** Death screen tells the story of the run: killer, upgrades taken, richer stats.
 **Hook points:** `damagePlayer` (track last damage source type), `gameOver` (render), `pickUpgrade` (log picks), `state.stats`, death-screen CSS (`#overStats`).
-**Sketch:** Track `state.lastHitBy` (set in every `damagePlayer` call — requires passing a source *type* string through: chaser/boss contact, enemy shot, exploder blast, rocket self-damage, laser, barrel). On death: "FLATLINED BY: EXPLODER — WAVE 8". Below stats, render picked upgrades as a row of small chips (name + rarity color once item 6 lands; plain otherwise). Add stats: damage dealt, damage taken, favorite weapon (most kills — needs per-weapon kill tally in `killEnemy`).
+**Sketch:** Track `state.lastHitBy` (set in every `damagePlayer` call — requires passing a source *type* string through: chaser/boss contact, enemy shot, exploder blast, rocket self-damage; laser and barrel once items 19–20 land). On death: "FLATLINED BY: EXPLODER — WAVE 8". Below stats, render picked upgrades as a row of small chips (name + rarity color once item 6 lands; plain otherwise). Add stats: damage dealt, damage taken, favorite weapon (most kills — needs per-weapon kill tally in `killEnemy`).
 **Done when:** killer attribution is correct for all damage paths (self-rocket says so — comedic value matters), upgrade chips wrap nicely with 8+ upgrades, everything resets between runs.
+
+### [ ] 19. Arena hazard — laser sweep
+**Goal:** From wave 6+, a rotating laser beam periodically sweeps the arena; touching it hurts.
+**Hook points:** `startWave` (arm the event), `update` (rotate + collision), `resetGame`, new scene objects (pooled/persistent, just hidden when inactive).
+**Sketch:** A tall emissive pillar at arena center (or one of the existing pillar tops) fires a horizontal beam (thin long box, red, with point light) that rotates 360° over ~8 s, once mid-wave with a 2 s warning (beam ghost at 20% opacity + `sfx.warn` beeps). Player collision: 2D line-segment vs player circle each frame while active, 15 dmg + knockback, 0.5 s per-hit cooldown. Enemies unaffected (it's a player-pressure tool) — OR damages enemies too for lure play; damaging enemies too is more fun: same falloff-free 15 dmg with per-enemy cooldown.
+**Done when:** warning gives fair reaction time, jump does NOT clear it (beam at torso height) but pillars block line-of-sight (skip damage if `segBlocked` between center and player), off during upgrades/pause, fully reset between runs. Once landed: add `laser` to item 18's killer attribution.
+
+### [ ] 20. Exploding barrels
+**Goal:** Neon canisters scattered per wave; shooting one causes a rocket-sized explosion that damages everything nearby.
+**Hook points:** `startWave` (spawn 3–5 at random clear spots — reuse the placement loop from `spawnRandomPickup`), hitscan target list in `fireWeapon`, rocket proximity check, `explodeRocket`-style blast (extract a shared `explodeAt(pos, dmg, radius, hurtsPlayer)` helper), `resetGame`, minimap dots optional.
+**Sketch:** Cylinder mesh, dark body + yellow emissive band + point light. 1 HP (any hit detonates). Blast: 60 dmg falloff over 6 units to enemies AND player (risk/reward). Chain reactions between barrels (delayed 0.15 s per hop for readability). Cap ~6 alive.
+**Done when:** barrels join the hitscan target list and rocket/enemy-shot? (enemy shots should NOT detonate them — player-only trigger keeps it strategic; document the choice), chains feel readable, disposed on reset, luring exploder/chaser packs into barrels works. Once landed: add `barrel` to item 18's killer attribution.
 
 ---
 
@@ -236,6 +236,40 @@ Append one entry per completed (or abandoned) session, newest first. Format:
 ```
 
 If an item is left `wip`, the entry MUST say exactly what remains and where the work stopped.
+
+### 2026-07-11 — Item 17: Challenge waves (mutators) — done
+- What landed: `MUTATORS` table + `state.mutator`, rolled in `startWave` when
+  `n % 7 === 0 && n % 5 !== 0` (boss waves win the collision — first real hit is wave 35).
+  SWARM `#ff8f3a` (spawns ×2, all chasers, hp ×0.6, score ×1.5) · BULLET HELL `#b04bff`
+  (shooters only, fireCD ×0.5 at spawn AND on refire, score ×1.5) · BERSERK `#ff2020`
+  (enemy speed ×1.5 incl. splitter minis, damage ×1.5 via `damageEnemy`, score ×2) ·
+  FRENZY `#00f0ff` (spawns ×1.5, infinite ammo: mags topped on entry, `w.mag--` skipped,
+  `reload()` refuses, HUD mag reads `∞ / ∞`). Banner = `flashCombo('☣ NAME', color)` +
+  `flashTip` description + new `sfx.mutator` (wave beep layered with a dissonant sawtooth
+  + noise). Reverted in `nextWaveCheck` (the wave-clear moment, via new `clearMutator()`
+  which also restores the ammo counter), in `gameOver`, and in `resetGame`.
+- Tuning chosen: score multiplier applies to kill score only —
+  `Math.round(scoreVal × combo × scoreMul)` — style bonuses stay flat. BERSERK's ×1.5 sits
+  at the top of `damageEnemy`, so every damage path scales, including enemy-vs-enemy blasts
+  (deliberate: only ever helps the player). FRENZY tops all mags at wave start (an empty
+  mag would dead-lock `fireWeapon`'s `mag <= 0 → reload` path) and cancels an in-flight
+  reload; mags stay full after the wave, reserves untouched; no score multiplier — infinite
+  rockets IS the reward. Elites still roll on mutator waves (an ELITE SWIFT swarm chaser is
+  a fun spike). Forced types skip the whole type-roll chain, so `forceT` waves consume no
+  type randomness (rig-sensitive tests beware).
+- Notes for next sessions: verified via headless-Chrome playtest — 33 unit checks (wave
+  gate incl. 35-collision, banner text/color/tip, sfx spy both ways, per-mutator exact
+  math: toSpawn 15→30/22, hp 80.4, fireCD 1.0 + live refire in [0.9,1.65], speed 14.3775,
+  damage 50→75, mini speed 13.875, score ×1.5/×2 with the combo-bump, FRENZY top-up/
+  no-decrement/reload-refusal/∞-HUD/restore, wave-clear revert, gameOver + resetGame
+  no-leak, flat style bonus during mutator) + 6 integration checks (real run waves 1→8,
+  wave-7 real roll + banner, wave 8 clean, die + restart + 1 wave) + SWARM load test
+  (29 chasers + shotgun spam, 36.5 FPS swiftshader ≈ baseline, screenshot eyeballed);
+  zero console errors. Gotchas for test authors: `killEnemy` bumps combo BEFORE computing
+  score, so a kill at combo N scores ×(N+1); and only the FRENZY mag shows ∞ — the blaster
+  reserve is ALWAYS ∞, so leak assertions must check the string prefix, not includes().
+  Item 18 (death recap): nothing new to attribute — mutators add no damage source types.
+  No new controls → no touch work.
 
 ### 2026-07-11 — Item 16: Elite enemy modifiers — done
 - What landed: elite roll in `spawnEnemy` right after the type roll (wave 3+, 8%, kind drawn
@@ -270,7 +304,7 @@ If an item is left `wip`, the entry MUST say exactly what remains and where the 
   before the LAST `</script>` — the first one closes the import map and corrupting it kills
   the module silently; Math.random rig sequences are call-order-dependent per type path (type
   rolls short-circuit below their wave gates, so wasp/bulwark/splitter consume no roll at low
-  waves). Item 18 (barrels): the `(e.baseScale || 1)` pattern is now how any sized variant
+  waves). Item 20 (barrels): the `(e.baseScale || 1)` pattern is now how any sized variant
   coexists with the damage-flash scale writes. No new controls → no touch work.
 
 ### 2026-07-11 — Item 15: Boss phases — done
@@ -301,7 +335,7 @@ If an item is left `wip`, the entry MUST say exactly what remains and where the 
   27.8 FPS during the live phase-2 fight — same-page swiftshader measure, reads low per the
   session-12 lesson; no console errors). Screenshots eyeballed: stagger = white blaze,
   phase 2 = hot red vs the pink pillars. Dodge math: ring gaps ≈ 7.8 u at 15 u (strafe
-  clears), 7-spread gaps ≈ 3.3 u at 15 u (dash clears). Item 19 (mutators) note: wave-35
+  clears), 7-spread gaps ≈ 3.3 u at 15 u (dash clears). Item 17 (mutators) note: wave-35
   boss+mutator collision rule already in that spec. No new controls → no touch work.
 
 ### 2026-07-10 — Item 14: Splitter enemy — done
