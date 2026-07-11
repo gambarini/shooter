@@ -25,7 +25,7 @@ close out with a Session Log entry at the bottom of this file.
 | 15 | Boss phases                   | 3     | done   | 9a28d5a |
 | 16 | Elite enemy modifiers         | 3     | done   | d00efea |
 | 17 | Challenge waves (mutators)    | 4     | done   | bafe12b |
-| 18 | Death recap & run summary     | 4     | done   |        |
+| 18 | Death recap & run summary     | 4     | done   | 3c7c2e8 |
 | 19 | Arena hazard — laser sweep    | 4     | todo   |        |
 | 20 | Exploding barrels             | 4     | todo   |        |
 
