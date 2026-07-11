@@ -25,7 +25,7 @@ close out with a Session Log entry at the bottom of this file.
 | 15 | Boss phases                   | 3     | done   | 9a28d5a |
 | 16 | Elite enemy modifiers         | 3     | done   | d00efea |
 | 17 | Challenge waves (mutators)    | 4     | done   | bafe12b |
-| 18 | Death recap & run summary     | 4     | todo   |        |
+| 18 | Death recap & run summary     | 4     | done   |        |
 | 19 | Arena hazard — laser sweep    | 4     | todo   |        |
 | 20 | Exploding barrels             | 4     | todo   |        |
 
@@ -189,7 +189,7 @@ Store as `e.elite = 'SWIFT' | ...`. Show a small floating label? No DOM-per-enem
 Banner via `flashCombo` with distinct color + `sfx.wave` variant. Revert everything in the wave-clear path AND in `gameOver`/`resetGame` (mutators must never leak across waves/runs).
 **Done when:** each mutator is clearly announced, score bonus applies only during the wave, no mutator state leaks (check death mid-mutator → restart), boss waves (multiples of 5) never collide with mutator waves (7, 14, 21, 28... vs 5, 10, 15... — wave 35 collides: mutator skips if boss wave).
 
-### [ ] 18. Death recap & run summary
+### [x] 18. Death recap & run summary
 **Goal:** Death screen tells the story of the run: killer, upgrades taken, richer stats.
 **Hook points:** `damagePlayer` (track last damage source type), `gameOver` (render), `pickUpgrade` (log picks), `state.stats`, death-screen CSS (`#overStats`).
 **Sketch:** Track `state.lastHitBy` (set in every `damagePlayer` call — requires passing a source *type* string through: chaser/boss contact, enemy shot, exploder blast, rocket self-damage; laser and barrel once items 19–20 land). On death: "FLATLINED BY: EXPLODER — WAVE 8". Below stats, render picked upgrades as a row of small chips (name + rarity color once item 6 lands; plain otherwise). Add stats: damage dealt, damage taken, favorite weapon (most kills — needs per-weapon kill tally in `killEnemy`).
@@ -236,6 +236,43 @@ Append one entry per completed (or abandoned) session, newest first. Format:
 ```
 
 If an item is left `wip`, the entry MUST say exactly what remains and where the work stopped.
+
+### 2026-07-11 — Item 18: Death recap & run summary — done
+- What landed: `damagePlayer(amt, src, by)` — the new `by` label sets `state.lastHitBy` and
+  `stats.dmgTaken` tallies (both skipped by the invuln early-return). Every call site labeled:
+  rocket self-splash 'YOUR OWN ROCKET', exploder blast, wasp dive, bulwark charge, contact
+  ('BOSS'/'MINI'/'SPLITTER'/'CHASER'), and enemy shots — `spawnEnemyShot` gained a `src` param
+  stored on the shot ('SHOOTER' from the shooter branch, 'BOSS' from the volley); all non-boss
+  labels get an 'ELITE ' prefix when `e.elite`. `damageEnemy` gained a trailing `src` param:
+  `stats.dmgDealt` tallies every hit EXCEPT `src === 'ENEMY'` (exploder-fuse + exploder/
+  VOLATILE-elite death blasts), and `src === 'ROCKET'` (set by `explodeRocket`) credits splash
+  kills to ROCKET in the new `stats.wkills` per-weapon kill tally — hitscan kills tally via
+  `weapons.includes(kw)`, so TRAIL_KW / chain / ricochet / nova / volatile kills don't count.
+  `pickUpgrade` pushes the def onto `state.upgrades`. Death screen: `#overKiller` line
+  "FLATLINED BY: X — WAVE N" ('THE ARENA' fallback), stats grid grows to 8 (DMG DEALT / DMG
+  TAKEN rounded, FAV WEAPON in smaller `.txt` type; `#overStats` now flex-wraps), and
+  `#overUps` renders picks as rarity-colored chips (common cyan / rare purple / epic gold,
+  duplicates shown twice, row hidden when no picks). All new state resets in `resetGame`.
+- Tuning chosen: dmgDealt counts post-multiplier applied damage (after SHIELDED-elite DR and
+  BERSERK ×1.5) including overkill; player-sourced upgrade blasts (volatile/chain/trail/nova)
+  count as damage dealt but never as weapon kills. FAV WEAPON ties go to the earlier weapon
+  slot (BLASTER > SHOTGUN > ROCKET), '—' when no direct weapon kill happened. Unlabeled
+  damagePlayer calls keep the previous label (defensive — every current path is labeled).
+- Notes for next sessions: verified via headless-Chrome playtest — 55 checks (damagePlayer
+  plumbing incl. invuln gate, dmgDealt exactness for plain/SHIELDED-75/ENEMY-skip/BERSERK-15,
+  wkills for all 3 weapons + TRAIL_KW/kw-null exclusions + far-rocket no-self-hit, 11 live
+  attribution paths incl. ELITE prefixes + real elite-shooter/boss-volley shot tags, killer
+  line exact text + THE ARENA fallback, 8-stat grid with rounded values, fav-weapon
+  most/none/tie, 9-chip render with computed rare/epic colors wrapping 2+ rows inside the
+  card, chips hidden with no picks, pickUpgrade logging, resetGame full clear, real run to
+  wave 4 + real death (killer matched a known source at the right wave, chips == picks) +
+  againBtn restart to wave 2 with fresh tallies, FPS > 20 swiftshader during a live wave,
+  zero console errors / no failed requests beyond favicon); screenshots of both death screens
+  eyeballed. NEW HARNESS TRAP: the `__dbg` injection comment must never contain the literal
+  script close tag — HTML terminates the script element at the first occurrence even inside a
+  JS comment, and the module dies silently (page still boots, `__dbg` just never appears).
+  Items 19/20: their killer attribution is now a one-arg change — pass 'LASER' / 'BARREL' as
+  the third damagePlayer arg at the new call sites. No new controls → no touch work.
 
 ### 2026-07-11 — Item 17: Challenge waves (mutators) — done
 - What landed: `MUTATORS` table + `state.mutator`, rolled in `startWave` when

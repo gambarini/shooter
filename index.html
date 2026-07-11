@@ -119,10 +119,17 @@
   #rerollBtn:hover { border-color:var(--neon); box-shadow:0 0 18px rgba(0,240,255,.4); }
   #rerollBtn.used { opacity:.3; pointer-events:none; }
 
-  /* Death-screen stats */
-  #overStats { display:flex; gap:22px; justify-content:center; margin:4px 0 20px; }
+  /* Death-screen stats + recap */
+  #overKiller { font-size:12px; letter-spacing:2px; color:#ff8fb4; text-shadow:0 0 10px var(--hot); margin:2px 0 4px; }
+  #overStats { display:flex; flex-wrap:wrap; gap:12px 22px; justify-content:center; margin:4px 0 16px; }
   #overStats .stat { font-size:11px; color:#6f93a6; letter-spacing:2px; }
   #overStats .stat b { display:block; font-size:22px; color:#9fe9ff; margin-bottom:2px; text-shadow:0 0 10px var(--neon); }
+  #overStats .stat b.txt { font-size:14px; line-height:26px; }
+  #overUps { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin:0 auto 16px; max-width:520px; }
+  #overUps .chip { font-size:9px; letter-spacing:2px; padding:4px 9px; border-radius:8px;
+                   border:1px solid rgba(0,240,255,.35); color:#9fe9ff; background:rgba(0,18,30,.9); }
+  #overUps .chip.rare { border-color:rgba(190,110,255,.5); color:#be6eff; text-shadow:0 0 6px rgba(190,110,255,.5); }
+  #overUps .chip.epic { border-color:rgba(255,200,60,.55); color:#ffc83c; text-shadow:0 0 6px rgba(255,200,60,.5); }
 
   /* Minimap */
   #minimap { position:absolute; top:80px; right:28px; width:160px; height:160px;
@@ -280,8 +287,10 @@
   </div>
   <div class="card hidden" id="overCard">
     <h1 style="background:linear-gradient(90deg,#ff2e88,#ff8f5c);-webkit-background-clip:text;background-clip:text;">FLATLINED</h1>
+    <div id="overKiller"></div>
     <div class="final">FINAL SCORE<b id="finalScore">0</b></div>
     <div id="overStats"></div>
+    <div id="overUps"></div>
     <div class="best" id="overBest">BEST <b>0</b></div>
     <div class="sub" id="overSub">You reached wave 1.</div>
     <button id="againBtn">↻ RUN IT BACK</button>
@@ -651,6 +660,7 @@ function pickUpgrade(i) {
   const u = upgradeChoices[i];
   if (!state.choosing || !u) return;
   u.apply();
+  state.upgrades.push(u);   // death-recap chips
   upgradeEl.classList.add('hidden');
   state.choosing = false;
   upgradeChoices = [];
@@ -827,10 +837,10 @@ const enemyShots = [];        // enemy projectiles
 const enemyShotPool = [];
 const ENEMY_SHOT_GEO = new THREE.SphereGeometry(0.32, 8, 8);
 const ENEMY_SHOT_MAT = new THREE.MeshBasicMaterial({ color: 0xb04bff });
-function spawnEnemyShot(origin, dir) {
+function spawnEnemyShot(origin, dir, src) {
   const m = enemyShotPool.pop() || new THREE.Mesh(ENEMY_SHOT_GEO, ENEMY_SHOT_MAT);
   m.position.copy(origin); m.visible = true; scene.add(m);
-  enemyShots.push({ mesh: m, vel: dir.clone().multiplyScalar(26), life: 5 });
+  enemyShots.push({ mesh: m, vel: dir.clone().multiplyScalar(26), life: 5, src });
   sfx.enemyShot();
 }
 function freeRocket(r) { scene.remove(r.mesh); r.mesh.visible = false; rocketPool.push(r.mesh); }
@@ -1031,7 +1041,8 @@ function spawnRandomPickup(forceType) {
 // ===========================================================================
 const state = { running: false, paused: false, choosing: false, rerolled: false, score: 0, wave: 0, toSpawn: 0, spawnTimer: 0,
                 combo: 1, comboTimer: 0, betweenWaves: 0, pickupTimer: 8, shake: 0, time: 0, slowmo: 0, ult: 0, mutator: null,
-                stats: { shots: 0, hits: 0, crits: 0, kills: 0, bestCombo: 1, style: 0 } };
+                lastHitBy: null, upgrades: [],
+                stats: { shots: 0, hits: 0, crits: 0, kills: 0, bestCombo: 1, style: 0, dmgDealt: 0, dmgTaken: 0, wkills: {} } };
 
 // Challenge waves: every 7th wave rolls one mutator, announced with a banner and
 // reverted the moment the wave clears (and on gameOver/resetGame — never leaks).
@@ -1315,9 +1326,13 @@ function spawnJaggedTracer(from, to) {
 
 // kw/kdist: killing weapon + hit distance for direct hitscan hits; null for
 // splash/chain damage (those kills never earn style bonuses).
-function damageEnemy(enemy, dmg, point, crit, kw, kdist) {
+// src: 'ROCKET' credits splash kills to the rocket in the weapon tally;
+// 'ENEMY' marks enemy-sourced blasts (exploder/elite detonations) so they
+// don't count as damage the player dealt.
+function damageEnemy(enemy, dmg, point, crit, kw, kdist, src) {
   if (enemy.elite === 'SHIELDED' && !crit) dmg *= 0.75;   // flat 25% DR, crits ignore it
   if (state.mutator && state.mutator.dmgMul) dmg *= state.mutator.dmgMul;   // BERSERK: everything hits harder
+  if (src !== 'ENEMY') state.stats.dmgDealt += dmg;
   enemy.hp -= dmg; enemy.damageTimer = 0.12;
   // Boss phase 2 at < 50% hp. phase flips inside bossEnrage, so this can never
   // double-trigger; an overkill hit (hp <= 0) skips straight to killEnemy.
@@ -1330,10 +1345,10 @@ function damageEnemy(enemy, dmg, point, crit, kw, kdist) {
   }
   else sfx.hit();
   if (point) burst(point, enemy.color, 6, 10);
-  if (enemy.hp <= 0) killEnemy(enemy, kw, kdist);
+  if (enemy.hp <= 0) killEnemy(enemy, kw, kdist, src);
 }
 const STREAKS = { 5: '⚡ RAMPAGE', 8: '🔥 UNSTOPPABLE', 12: '💀 GODLIKE' };
-function killEnemy(enemy, kw, kdist) {
+function killEnemy(enemy, kw, kdist, src) {
   const isBoss = enemy.type === 'boss';
   burst(enemy.mesh.position, enemy.color, isBoss ? 60 : 26, isBoss ? 28 : 20, isBoss ? 0.32 : 0.22);
   disposeEnemy(enemy);
@@ -1342,6 +1357,11 @@ function killEnemy(enemy, kw, kdist) {
   state.comboTimer = 3.0; state.combo = Math.min(state.combo + 1, 99);
   state.stats.kills++;
   state.stats.bestCombo = Math.max(state.stats.bestCombo, state.combo);
+  // Favorite-weapon tally: direct hitscan kills carry the weapon (kw), rocket
+  // splash carries src='ROCKET'. Upgrade kills (chain/ricochet/trail/nova/
+  // volatile) and TRAIL_KW aren't weapons and don't count.
+  const wname = kw && weapons.includes(kw) ? kw.name : src === 'ROCKET' ? 'ROCKET' : null;
+  if (wname) state.stats.wkills[wname] = (state.stats.wkills[wname] || 0) + 1;
   // Nova charge — kills made BY the nova blast don't recharge it (no free refunds).
   if (!novaBlasting && state.ult < 100) {
     state.ult = Math.min(100, state.ult + (isBoss ? 25 : 8));
@@ -1377,7 +1397,7 @@ function killEnemy(enemy, kw, kdist) {
     burst(enemy.mesh.position, 0x8aff3a, 24, 18, 0.26); sfx.explode();
     for (const e of [...enemies]) {
       const d = e.mesh.position.distanceTo(enemy.mesh.position);
-      if (d < 5 && e.hp > 0) damageEnemy(e, 30 * (1 - d / 5), null);
+      if (d < 5 && e.hp > 0) damageEnemy(e, 30 * (1 - d / 5), null, false, null, null, 'ENEMY');
     }
   }
   // Volatile deaths (upgrade): some kills detonate — orange (vs exploder green),
@@ -1454,12 +1474,12 @@ function explodeRocket(pos) {
   for (const e of [...enemies]) {
     const d = e.mesh.position.distanceTo(pos);
     // splash doesn't care about facing, but a raised bulwark shield still halves it
-    if (d < splash) { hitAny = true; damageEnemy(e, w.damage * mods.damage * (1 - d / splash) * (e.type === 'bulwark' && e.shieldUp ? 0.5 : 1), null); }
+    if (d < splash) { hitAny = true; damageEnemy(e, w.damage * mods.damage * (1 - d / splash) * (e.type === 'bulwark' && e.shieldUp ? 0.5 : 1), null, false, null, null, 'ROCKET'); }
   }
   if (hitAny) state.stats.hits++;
   // self splash if too close
   const pd = player.pos.distanceTo(pos);
-  if (pd < splash * 0.7) damagePlayer(20 * (1 - pd / (splash * 0.7)), null);
+  if (pd < splash * 0.7) damagePlayer(20 * (1 - pd / (splash * 0.7)), null, 'YOUR OWN ROCKET');
 }
 
 // ===========================================================================
@@ -1708,7 +1728,7 @@ function update(dt) {
         e.fireCD = (1.8 + Math.random() * 1.5) * (state.mutator ? state.mutator.fireCDMul || 1 : 1);
         const muzzlePos = e.mesh.position.clone();
         const aim = new THREE.Vector3(player.pos.x - muzzlePos.x, (player.pos.y - 0.3) - muzzlePos.y, player.pos.z - muzzlePos.z).normalize();
-        spawnEnemyShot(muzzlePos.add(aim.clone().multiplyScalar(1.4)), aim);
+        spawnEnemyShot(muzzlePos.add(aim.clone().multiplyScalar(1.4)), aim, (e.elite ? 'ELITE ' : '') + 'SHOOTER');
       }
     } else if (e.type === 'boss') {
       if (e.staggerT > 0) {
@@ -1740,7 +1760,7 @@ function update(dt) {
             const aim = new THREE.Vector3(Math.sin(ang), -0.04, Math.cos(ang)).normalize();
             const origin = e.mesh.position.clone().add(aim.clone().multiplyScalar(3.4));
             origin.y = 2.4;
-            spawnEnemyShot(origin, aim);
+            spawnEnemyShot(origin, aim, 'BOSS');
           }
         }
       }
@@ -1755,10 +1775,10 @@ function update(dt) {
         state.shake = Math.min(0.6, state.shake + 0.35);
         disposeEnemy(e); enemies.splice(ei, 1);
         const pd = player.pos.distanceTo(pos);
-        if (pd < 6) damagePlayer(30 * (1 - pd / 6), pos);
+        if (pd < 6) damagePlayer(30 * (1 - pd / 6), pos, (e.elite ? 'ELITE ' : '') + 'EXPLODER');
         for (const other of [...enemies]) {
           const d = other.mesh.position.distanceTo(pos);
-          if (d < 6) damageEnemy(other, 40 * (1 - d / 6), null);
+          if (d < 6) damageEnemy(other, 40 * (1 - d / 6), null, false, null, null, 'ENEMY');
         }
         continue;
       }
@@ -1793,7 +1813,7 @@ function update(dt) {
         e.waspT -= dt;
         e.mesh.position.addScaledVector(e.diveDir, WASP_DIVE_SPEED * dt);
         if (e.mesh.position.distanceTo(player.pos) < e.radius + player.radius + 0.4) {
-          damagePlayer(12, e.mesh.position);
+          damagePlayer(12, e.mesh.position, (e.elite ? 'ELITE ' : '') + 'WASP');
           e.waspState = 'climb';
         } else if (e.mesh.position.y <= 1.0 || e.waspT <= 0) {
           burst(e.mesh.position, e.color, 6, 8);   // whiffed into the floor
@@ -1844,7 +1864,7 @@ function update(dt) {
         e.bwT -= dt;
         e.mesh.position.addScaledVector(e.chargeDir, 24 * dt);
         if (dist < e.radius + player.radius + 0.4) {
-          damagePlayer(25, e.mesh.position);
+          damagePlayer(25, e.mesh.position, (e.elite ? 'ELITE ' : '') + 'BULWARK');
           player.vel.x += e.chargeDir.x * 12; player.vel.z += e.chargeDir.z * 12;   // shoved
           bulwarkStagger(e);
         } else if (e.bwT <= 0) bulwarkStagger(e);
@@ -1894,7 +1914,8 @@ function update(dt) {
 
     if ((e.type === 'chaser' || e.type === 'boss' || e.type === 'splitter') && dist < e.radius + player.radius + 0.4) {
       if (!e._cool || t - e._cool > 0.6) {
-        e._cool = t; damagePlayer(e.type === 'boss' ? 22 : e.mini ? 8 : 12, e.mesh.position);
+        e._cool = t; damagePlayer(e.type === 'boss' ? 22 : e.mini ? 8 : 12, e.mesh.position,
+          e.type === 'boss' ? 'BOSS' : (e.elite ? 'ELITE ' : '') + (e.mini ? 'MINI' : e.type === 'splitter' ? 'SPLITTER' : 'CHASER'));
         e.mesh.position.x -= toP.x * 2; e.mesh.position.z -= toP.z * 2;
       }
     }
@@ -1944,7 +1965,7 @@ function update(dt) {
     let gone = s.life <= 0;
     if (sp.distanceTo(player.pos) < player.radius + 0.6) {
       // indicator points back along the shot's incoming path
-      damagePlayer(10, _tmpB.copy(sp).sub(s.vel)); gone = true;
+      damagePlayer(10, _tmpB.copy(sp).sub(s.vel), s.src); gone = true;
     }
     if (!gone) {
       if (sp.y <= 0.3 || Math.abs(sp.x) > ARENA - 2 || Math.abs(sp.z) > ARENA - 2) gone = true;
@@ -2022,8 +2043,10 @@ function collectPickup(p) {
   }
 }
 
-function damagePlayer(amt, src) {
+function damagePlayer(amt, src, by) {
   if (!state.running || player.invuln > 0) return;
+  if (by) state.lastHitBy = by;   // death recap: last thing that actually hurt us
+  state.stats.dmgTaken += amt;
   player.hp -= amt; updateHealthUI(); damageFlash(); sfx.hurt();
   if (src) showDamageDir(src.x, src.z);
   state.shake = Math.min(0.5, state.shake + 0.25);
@@ -2236,7 +2259,8 @@ function resetGame() {
   state.score = 0; state.wave = 0; state.combo = 1; state.comboTimer = 0;
   state.toSpawn = 0; state.betweenWaves = 0; state.pickupTimer = 8; state.shake = 0;
   state.time = 0; state.slowmo = 0; state.choosing = false; state.rerolled = false; state.mutator = null;
-  state.stats = { shots: 0, hits: 0, crits: 0, kills: 0, bestCombo: 1, style: 0 };
+  state.lastHitBy = null; state.upgrades = [];
+  state.stats = { shots: 0, hits: 0, crits: 0, kills: 0, bestCombo: 1, style: 0, dmgDealt: 0, dmgTaken: 0, wkills: {} };
   lowHp = false; heartbeatT = 0; ui.lowhp.style.opacity = 0;
   updateScoreUI(); updateHealthUI(); updateWeaponUI();
 }
@@ -2257,12 +2281,22 @@ function gameOver() {
   if (!isTouch) document.exitPointerLock();
   const st = state.stats;
   const acc = st.shots > 0 ? Math.round(st.hits / st.shots * 100) : 0;
+  document.getElementById('overKiller').textContent =
+    `FLATLINED BY: ${state.lastHitBy || 'THE ARENA'} — WAVE ${state.wave}`;
+  let fav = '—', favN = 0;   // stable order: earlier weapon wins ties
+  for (const w of weapons) { const n = st.wkills[w.name] || 0; if (n > favN) { favN = n; fav = w.name; } }
   document.getElementById('overStats').innerHTML =
     `<div class="stat"><b>${st.kills}</b>KILLS</div>` +
     `<div class="stat"><b>${acc}%</b>ACCURACY</div>` +
     `<div class="stat"><b>${st.crits}</b>CRITS</div>` +
     `<div class="stat"><b>x${st.bestCombo}</b>BEST COMBO</div>` +
-    `<div class="stat"><b>${st.style}</b>STYLE PTS</div>`;
+    `<div class="stat"><b>${Math.round(st.dmgDealt)}</b>DMG DEALT</div>` +
+    `<div class="stat"><b>${Math.round(st.dmgTaken)}</b>DMG TAKEN</div>` +
+    `<div class="stat"><b>${st.style}</b>STYLE PTS</div>` +
+    `<div class="stat"><b class="txt">${fav}</b>FAV WEAPON</div>`;
+  const ups = document.getElementById('overUps');
+  ups.innerHTML = state.upgrades.map(u => `<span class="chip ${u.rarity}">${u.name}</span>`).join('');
+  ups.style.display = state.upgrades.length ? 'flex' : 'none';
   const isNewBest = state.score > bestScore;
   if (isNewBest) { bestScore = state.score; try { localStorage.setItem(BEST_KEY, bestScore); } catch {} renderBest(); }
   document.getElementById('finalScore').textContent = state.score;
