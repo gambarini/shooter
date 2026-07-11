@@ -22,7 +22,7 @@ close out with a Session Log entry at the bottom of this file.
 | 12 | Flying enemy — WASP           | 3     | done   | 7c5700d |
 | 13 | Shielded tank — BULWARK       | 3     | done   | cd297f2 |
 | 14 | Splitter enemy                | 3     | done   | 1a61931 |
-| 15 | Boss phases                   | 3     | todo   |        |
+| 15 | Boss phases                   | 3     | done   |        |
 | 16 | Elite enemy modifiers         | 3     | todo   |        |
 | 17 | Arena hazard — laser sweep    | 4     | todo   |        |
 | 18 | Exploding barrels             | 4     | todo   |        |
@@ -158,7 +158,7 @@ Item 16 (elite modifiers) benefits from 12–14 (more enemy types to modify) but
 **Sketch:** Bigger icosahedron (scale ~1.5), teal/green two-tone. Appears wave 4+. On death: spawn 2–3 `chaser`-type enemies at 0.55 scale, hp ~15, speed ~9, radius ~0.7, tiny score (25). Children spawn slightly separated (use the separation pass to settle). Children must NOT be counted in `state.toSpawn` (they come from deaths) — wave-clear logic (`nextWaveCheck`) already keys off `enemies.length` so it just works; verify.
 **Done when:** split feels punchy (burst + sound), minis are killable in 1 blaster shot, no wave-stall where minis spawn after the wave-clear check in the same frame kills the parent last.
 
-### [ ] 15. Boss phases
+### [x] 15. Boss phases
 **Goal:** Boss gets a second phase at 50% HP: faster, angrier, new attack pattern.
 **Hook points:** boss branch of enemy `update` loop, `damageEnemy` (phase-transition trigger), `spawnBoss` (phase field), boss HP bar.
 **Sketch:** `e.phase = 1`. When hp < maxHp/2 and phase 1: transition — 1 s stagger (stop moving, flash white, `sfx.explode`, shake, `flashCombo('⚠ ENRAGED')`), then phase 2: +40% speed, volley becomes 7 shots (`k: -3..3`) AND alternates with a full 12-shot radial ring every other volley; fireCD drops to 1.8. Boss bar changes gradient to angrier red. Optional: spawn 2 chasers at the transition.
@@ -236,6 +236,37 @@ Append one entry per completed (or abandoned) session, newest first. Format:
 ```
 
 If an item is left `wip`, the entry MUST say exactly what remains and where the work stopped.
+
+### 2026-07-11 — Item 15: Boss phases — done
+- What landed: boss gains `phase: 1, staggerT: 0, volleyAlt: false`. Single trigger in
+  `damageEnemy` (`type==='boss' && phase===1 && hp>0 && hp < maxHp/2` → `bossEnrage`, defined
+  next to `spawnBoss`): emissive → white, `sfx.explode`, shake +0.5, `flashCombo('⚠ ENRAGED',
+  '#ff2020')`, `staggerT = 1.0`. Boss update branch: while staggered it's frozen in place
+  strobing white (2.5 ± 2·sin(t·30)); buffs land when the stagger ENDS — speed ×1.4, body
+  emissive + `e.color` → `0xff2020`, core → white, `fireCD = min(fireCD, 1.0)` (wakes up
+  shooting), `sfx.charge`. Phase-2 firing: fireCD 1.8 (vs 2.6), 7-shot aimed spread (k −3..3)
+  alternating with a 12-shot radial ring (30° spacing; first post-wake volley is a ring).
+  `#bossfill.enraged` CSS (red→orange gradient) toggled per frame off `boss.phase`, removed
+  in `resetGame`. Damage-flash reset gained a boss-stagger exception so shooting the boss
+  mid-stagger doesn't flatten the strobe to the flat 2.2 flash.
+- Tuning chosen: buffs at stagger end make the full 1 s a free punish window. Skipped the
+  spec's optional 2-chaser spawn at the transition — stagger + strobe + banner + shake already
+  read unmissable and the ring volley is the difficulty add. Overkill through the threshold
+  (hp ≤ 0 in one hit) skips enrage via the `hp > 0` guard; phase flips inside `bossEnrage`
+  so double-trigger is structurally impossible. All damage paths (splash/chain/nova) route
+  through `damageEnemy`, so any source can trip the transition.
+- Notes for next sessions: verified via headless-Chrome playtest (38 checks: spawn fields,
+  51%-no-trigger, threshold flip + white + banner + shake + explode spy, frozen + strobe
+  overriding damage-flash under sustained fire, exact ×1.4 speed at waves 5 AND 10 (maxHp
+  1500/2100), red body + white core + charge spy + `.enraged` class, volley pattern 12,7,12,7
+  with 30°±0.02 ring spacing + 1.32 rad spread width + ~1.8 s cadence, no re-trigger, bar
+  width tracks hp, phase-2 kill banner, overkill skip, reset mid-stagger + clean next boss,
+  real run waves 1→5 through both phases → boss dead → wave 6 → die → restart → 1 wave;
+  27.8 FPS during the live phase-2 fight — same-page swiftshader measure, reads low per the
+  session-12 lesson; no console errors). Screenshots eyeballed: stagger = white blaze,
+  phase 2 = hot red vs the pink pillars. Dodge math: ring gaps ≈ 7.8 u at 15 u (strafe
+  clears), 7-spread gaps ≈ 3.3 u at 15 u (dash clears). Item 19 (mutators) note: wave-35
+  boss+mutator collision rule already in that spec. No new controls → no touch work.
 
 ### 2026-07-10 — Item 14: Splitter enemy — done
 - What landed: `splitter` enemy type (wave 4+, chance `min(0.22, 0.06 + wave*0.02)` rolled after

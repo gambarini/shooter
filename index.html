@@ -84,6 +84,7 @@
   #bosslabel { font-size:11px; letter-spacing:3px; color:#ff8fb4; text-shadow:0 0 10px #ff2e88; margin-bottom:5px; font-weight:800; }
   #bossbar { height:12px; background:rgba(255,46,136,.10); border:1px solid rgba(255,46,136,.55); border-radius:6px; overflow:hidden; }
   #bossfill { height:100%; width:100%; background:linear-gradient(90deg,#ff2e88,#ffe23a); box-shadow:0 0 14px #ff2e88; }
+  #bossfill.enraged { background:linear-gradient(90deg,#ff1a1a,#ff8f3a); box-shadow:0 0 16px #ff1a1a; }
 
   /* Directional damage indicator */
   .dmgdir { position:absolute; left:50%; top:50%; width:150px; height:150px; margin:-75px 0 0 -75px;
@@ -959,8 +960,21 @@ function spawnBoss(wave) {
     mesh, core, type: 'boss', hp, maxHp: hp,
     speed: 3.2 + wave * 0.05, radius: 3.0, spin: 0.5, bob: 0,
     color: hue, damageTimer: 0, fireCD: 2.5, preferDist: 0, fuse: -1,
+    // phase machine: 1 → (hp < 50%) staggerT-second freeze → 2 (enraged)
+    phase: 1, staggerT: 0, volleyAlt: false,
   });
   flashCombo(`⚠ BOSS INCOMING`, '#ff2e88');
+}
+
+// Boss phase transition (triggered from damageEnemy at < 50% hp, once): a 1 s
+// white-strobe stagger telegraphs it, then phase-2 buffs land when it ends
+// (speed +40%, fireCD 1.8, 7-shot volleys alternating with 12-shot rings).
+function bossEnrage(e) {
+  e.phase = 2; e.staggerT = 1.0;
+  e.mesh.material.emissive.setHex(0xffffff);
+  sfx.explode();
+  state.shake = Math.min(0.8, state.shake + 0.5);
+  flashCombo('⚠ ENRAGED', '#ff2020');
 }
 
 // ===========================================================================
@@ -1251,6 +1265,9 @@ function spawnJaggedTracer(from, to) {
 // splash/chain damage (those kills never earn style bonuses).
 function damageEnemy(enemy, dmg, point, crit, kw, kdist) {
   enemy.hp -= dmg; enemy.damageTimer = 0.12;
+  // Boss phase 2 at < 50% hp. phase flips inside bossEnrage, so this can never
+  // double-trigger; an overkill hit (hp <= 0) skips straight to killEnemy.
+  if (enemy.type === 'boss' && enemy.phase === 1 && enemy.hp > 0 && enemy.hp < enemy.maxHp / 2) bossEnrage(enemy);
   spawnDamageNumber(point || enemy.mesh.position, dmg, crit);
   showHitmark(crit);
   if (crit) {
@@ -1639,20 +1656,37 @@ function update(dt) {
         spawnEnemyShot(muzzlePos.add(aim.clone().multiplyScalar(1.4)), aim);
       }
     } else if (e.type === 'boss') {
-      // Lumbering approach + periodic radial volley aimed at the player.
-      steerAroundObstacles(e, toP, dist);
-      e.mesh.position.x += toP.x * e.speed * dt;
-      e.mesh.position.z += toP.z * e.speed * dt;
-      e.fireCD -= dt;
-      if (e.fireCD <= 0) {
-        e.fireCD = 2.6;
-        const base = Math.atan2(player.pos.x - e.mesh.position.x, player.pos.z - e.mesh.position.z);
-        for (let k = -2; k <= 2; k++) {
-          const ang = base + k * 0.22;
-          const aim = new THREE.Vector3(Math.sin(ang), -0.04, Math.cos(ang)).normalize();
-          const origin = e.mesh.position.clone().add(aim.clone().multiplyScalar(3.4));
-          origin.y = 2.4;
-          spawnEnemyShot(origin, aim);
+      if (e.staggerT > 0) {
+        // Phase transition: frozen in place, strobing white. Buffs land at the end
+        // so the whole stagger is a free punish window.
+        e.staggerT -= dt;
+        e.mesh.material.emissiveIntensity = 2.5 + Math.sin(t * 30) * 2;
+        if (e.staggerT <= 0) {
+          e.mesh.material.emissive.setHex(0xff2020); e.color = 0xff2020;
+          e.core.material.color.setHex(0xffffff);
+          e.speed *= 1.4;
+          e.fireCD = Math.min(e.fireCD, 1.0);   // wakes up shooting
+          sfx.charge();
+        }
+      } else {
+        // Lumbering approach + periodic radial volley aimed at the player.
+        // Phase 2: faster cadence, wider volley, every other shot a full ring.
+        steerAroundObstacles(e, toP, dist);
+        e.mesh.position.x += toP.x * e.speed * dt;
+        e.mesh.position.z += toP.z * e.speed * dt;
+        e.fireCD -= dt;
+        if (e.fireCD <= 0) {
+          e.fireCD = e.phase === 2 ? 1.8 : 2.6;
+          const ring = e.phase === 2 && (e.volleyAlt = !e.volleyAlt);
+          const base = Math.atan2(player.pos.x - e.mesh.position.x, player.pos.z - e.mesh.position.z);
+          const spread = e.phase === 2 ? 3 : 2;
+          for (let k = ring ? 0 : -spread; k <= (ring ? 11 : spread); k++) {
+            const ang = ring ? base + k * (Math.PI / 6) : base + k * 0.22;
+            const aim = new THREE.Vector3(Math.sin(ang), -0.04, Math.cos(ang)).normalize();
+            const origin = e.mesh.position.clone().add(aim.clone().multiplyScalar(3.4));
+            origin.y = 2.4;
+            spawnEnemyShot(origin, aim);
+          }
         }
       }
     } else if (e.type === 'exploder' && e.fuse >= 0) {
@@ -1797,8 +1831,11 @@ function update(dt) {
       collideArena(e.mesh.position, e.radius);
     }
 
-    if (e.damageTimer > 0) { e.damageTimer -= dt; e.mesh.material.emissiveIntensity = 2.2; e.mesh.scale.setScalar(1.15); }
-    else if (!(e.type === 'exploder' && e.fuse >= 0) && !(e.type === 'wasp' && e.waspState === 'telegraph') && !(e.type === 'bulwark' && e.bwState === 'windup')) { e.mesh.material.emissiveIntensity = 0.9; e.mesh.scale.setScalar(1); }
+    // The boss-stagger strobe owns the emissive while it runs (shooting the boss
+    // mid-stagger must not flatten the white flash to the damage-flash value).
+    const bossStagger = e.type === 'boss' && e.staggerT > 0;
+    if (e.damageTimer > 0 && !bossStagger) { e.damageTimer -= dt; e.mesh.material.emissiveIntensity = 2.2; e.mesh.scale.setScalar(1.15); }
+    else if (!bossStagger && !(e.type === 'exploder' && e.fuse >= 0) && !(e.type === 'wasp' && e.waspState === 'telegraph') && !(e.type === 'bulwark' && e.bwState === 'windup')) { e.mesh.material.emissiveIntensity = 0.9; e.mesh.scale.setScalar(1); }
 
     if ((e.type === 'chaser' || e.type === 'boss' || e.type === 'splitter') && dist < e.radius + player.radius + 0.4) {
       if (!e._cool || t - e._cool > 0.6) {
@@ -1809,8 +1846,11 @@ function update(dt) {
   }
   // boss health bar
   const boss = enemies.find(e => e.type === 'boss');
-  if (boss) { ui.bossWrap.style.display = 'block'; ui.bossFill.style.width = (boss.hp / boss.maxHp * 100) + '%'; }
-  else ui.bossWrap.style.display = 'none';
+  if (boss) {
+    ui.bossWrap.style.display = 'block';
+    ui.bossFill.style.width = (boss.hp / boss.maxHp * 100) + '%';
+    ui.bossFill.classList.toggle('enraged', boss.phase === 2);
+  } else ui.bossWrap.style.display = 'none';
   // separation
   for (let i = 0; i < enemies.length; i++)
     for (let j = i + 1; j < enemies.length; j++) {
@@ -2129,7 +2169,7 @@ function resetGame() {
   state.ult = 0; wantUlt = false; novaT = 0;
   novaRing.visible = novaShell.visible = false; novaLight.intensity = 0;
   updateUltUI();
-  ui.bossWrap.style.display = 'none';
+  ui.bossWrap.style.display = 'none'; ui.bossFill.classList.remove('enraged');
   upgradeEl.classList.add('hidden'); upgradeChoices = [];
 
   weapons[0].mag = weapons[0].magSize; weapons[0].reserve = Infinity;
