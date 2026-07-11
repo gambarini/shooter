@@ -23,7 +23,7 @@ close out with a Session Log entry at the bottom of this file.
 | 13 | Shielded tank — BULWARK       | 3     | done   | cd297f2 |
 | 14 | Splitter enemy                | 3     | done   | 1a61931 |
 | 15 | Boss phases                   | 3     | done   | 9a28d5a |
-| 16 | Elite enemy modifiers         | 3     | todo   |        |
+| 16 | Elite enemy modifiers         | 3     | done   |        |
 | 17 | Arena hazard — laser sweep    | 4     | todo   |        |
 | 18 | Exploding barrels             | 4     | todo   |        |
 | 19 | Challenge waves (mutators)    | 4     | todo   |        |
@@ -164,7 +164,7 @@ Item 16 (elite modifiers) benefits from 12–14 (more enemy types to modify) but
 **Sketch:** `e.phase = 1`. When hp < maxHp/2 and phase 1: transition — 1 s stagger (stop moving, flash white, `sfx.explode`, shake, `flashCombo('⚠ ENRAGED')`), then phase 2: +40% speed, volley becomes 7 shots (`k: -3..3`) AND alternates with a full 12-shot radial ring every other volley; fireCD drops to 1.8. Boss bar changes gradient to angrier red. Optional: spawn 2 chasers at the transition.
 **Done when:** transition is unmissable, phase 2 is harder but dodgeable with dash, works at wave 10+ (second boss) where HP scaling differs, no double-trigger of the transition.
 
-### [ ] 16. Elite enemy modifiers
+### [x] 16. Elite enemy modifiers
 **Goal:** Occasional elite variants of normal enemies: bigger, named modifier, guaranteed drop.
 **Hook points:** `spawnEnemy` (after type roll), `killEnemy` (guaranteed pickup + bonus score), minimap (elites slightly larger dot), `flashTip` on spawn optional.
 **Sketch:** From wave 3, each non-boss spawn has ~8% elite chance. Elite: scale 1.4, hp ×2.5, score ×3, guaranteed pickup drop, plus ONE modifier:
@@ -236,6 +236,42 @@ Append one entry per completed (or abandoned) session, newest first. Format:
 ```
 
 If an item is left `wip`, the entry MUST say exactly what remains and where the work stopped.
+
+### 2026-07-11 — Item 16: Elite enemy modifiers — done
+- What landed: elite roll in `spawnEnemy` right after the type roll (wave 3+, 8%, kind drawn
+  from `ELITE_KINDS`/`ELITE_TINT` — SWIFT `0x00f0ff`, VOLATILE `0x8aff3a`, SHIELDED `0xff7a1a`).
+  Elite = `e.elite` + `baseScale: 1.4` (mesh.scale set at spawn), hp ×2.5 (after wave scaling),
+  scoreVal ×3, radius ×1.4, hull emissive/core/`e.color` = base hue lerped 0.6 toward the mod
+  color, `flashTip('⚠ ELITE ' + kind, modColor)` on spawn. SWIFT: speed ×1.6. SHIELDED:
+  `dmg *= 0.75` for non-crits at the top of `damageEnemy` (covers every damage path; crits
+  pierce). VOLATILE: shares the exploder detonation block in `killEnemy`
+  (`type === 'exploder' || elite === 'VOLATILE'`) so an exploder that rolls VOLATILE explodes
+  exactly once — enemy-only 30-dmg/5-unit falloff, and the `else if` keeps the volatile
+  UPGRADE from stacking a second blast. Guaranteed drop: `enemy.elite ||` before the 0.22
+  roll. Scale-aware rewrites: damage-flash pops to `baseScale×1.15` and settles to `baseScale`
+  (not 1), exploder fuse swell multiplies from baseScale, bulwark + ground-type y ×baseScale,
+  minimap dot radius ×1.4.
+- Tuning chosen: tint blend 0.6 — full recolor killed type identity; on the hot-pink chaser
+  the three kinds read steel-blue / olive-green / orange-red at a glance (screenshot checked).
+  All 6 non-boss types can roll elite; minis are structurally excluded (`spawnMini`, per the
+  item-14 note) and an elite splitter's brood does NOT inherit elite — plain 15-hp minis, the
+  ×3 score + guaranteed drop is the parent's reward. VOLATILE blast is the exploder's flat 30
+  (no `mods.damage` — it's enemy-sourced, unlike the volatile upgrade's 35).
+- Notes for next sessions: verified via headless-Chrome playtest (41 checks: wave gate at 2/3
+  incl. 400 real wave-2 rolls, exact ×2.5/×3/×1.6/×1.4 field math vs a rigged plain twin,
+  per-type elite spawns (shooter/exploder/wasp/splitter/bulwark) with exact hp/radius/speed,
+  tint-lerp exactness on hull+core+e.color, flashTip, SHIELDED 75/100 with crit pierce,
+  VOLATILE falloff 18@d=2 / 0@d=8 / player untouched at d=1, exploder+VOLATILE single blast,
+  cascade = exactly 2 kills, guaranteed drop vs rigged-fail plain kill, score 300×combo,
+  brood non-elite, damage-flash 1.61→1.4, fuse swell >1.5, bulwark y≈1.96, minimap pixel
+  ratio ≈2×, 8% rate + uniform kinds over 2500 wave-6 spawns, live run waves 1→7 through the
+  wave-5 boss + die + restart + 1 wave, 35 FPS swiftshader under elite+shotgun load, zero
+  console errors with URL-aware 404 filtering). Harness traps found: `__dbg` injection must go
+  before the LAST `</script>` — the first one closes the import map and corrupting it kills
+  the module silently; Math.random rig sequences are call-order-dependent per type path (type
+  rolls short-circuit below their wave gates, so wasp/bulwark/splitter consume no roll at low
+  waves). Item 18 (barrels): the `(e.baseScale || 1)` pattern is now how any sized variant
+  coexists with the damage-flash scale writes. No new controls → no touch work.
 
 ### 2026-07-11 — Item 15: Boss phases — done
 - What landed: boss gains `phase: 1, staggerT: 0, volleyAlt: false`. Single trigger in
