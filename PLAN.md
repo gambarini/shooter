@@ -24,7 +24,7 @@ close out with a Session Log entry at the bottom of this file.
 | 14 | Splitter enemy                | 3     | done   | 1a61931 |
 | 15 | Boss phases                   | 3     | done   | 9a28d5a |
 | 16 | Elite enemy modifiers         | 3     | done   | d00efea |
-| 17 | Challenge waves (mutators)    | 4     | done   |        |
+| 17 | Challenge waves (mutators)    | 4     | done   | bafe12b |
 | 18 | Death recap & run summary     | 4     | todo   |        |
 | 19 | Arena hazard — laser sweep    | 4     | todo   |        |
 | 20 | Exploding barrels             | 4     | todo   |        |
