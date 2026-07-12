@@ -14,27 +14,42 @@ no tests — verification is playtesting in a browser.
 
 ## Roadmap workflow (the progressive loop)
 
-`PLAN.md` is the single source of truth for feature work. Each session does exactly ONE item:
+**The roadmap/plan is managed in NOTION, not in this repo.** The Notion page
+"NEON STRIKE — Roadmap HQ" is the single source of truth for feature work; `PLAN.md` is
+only a stub pointing there. Read AND update the plan via the Notion MCP tools
+(`mcp__notion__*`). If the Notion MCP server is not connected, stop and ask the user to
+connect it (`/mcp`) — do not fall back to editing PLAN.md.
 
-1. **Pick**: take the first `[ ]` item in phase order, unless the user names one.
-   Respect dependencies noted in PLAN.md (item 6 before 7–11).
-2. **Claim**: mark it `[~]` in PLAN.md.
-3. **Read first**: the "Codebase conventions" section of PLAN.md, the item's spec, and the
-   functions named in its "Hook points" before writing any code.
+- HQ page (workflow, conventions, reminders): https://app.notion.com/p/39b2711a768d819cbb8de2a85019926b
+- Roadmap database (one row per item, spec in the row's page):
+  https://app.notion.com/p/368c46f62b7d45918ce31e9042a9e4c0
+  — data source `collection://2bab5b91-2cad-44b1-8aa3-2f820594f0c4`
+- Session Log database (one entry per session):
+  https://app.notion.com/p/112e601ffa444653a30a0b178a3e7315
+  — data source `collection://8d944ded-d820-4bde-9cdd-e9b83c5349b6`
+
+Each session does exactly ONE item:
+
+1. **Pick**: query the Roadmap database and take the first `todo` item in phase order
+   (`#` order), unless the user names one. Respect dependencies noted on the HQ page
+   (item 6 before 7–11).
+2. **Claim**: set the item's Status to `wip` in the Roadmap database.
+3. **Read first**: the "Codebase conventions" section of the HQ page, the item's row page
+   (spec), and the functions named in its "Hook points" before writing any code.
 4. **Implement**: stay within the item's scope. If you discover a bug or an improvement
-   outside scope, add a note to the Session Log in PLAN.md instead of fixing it now.
+   outside scope, note it in the Session Log entry instead of fixing it now.
 5. **Verify**: run the game, exercise every "Done when" criterion of the item, plus the
    minimum verification above.
 6. **Close out**:
-   - Mark the item `[x]`.
-   - Append a Session Log entry in PLAN.md (see format there): what landed, tuning values
-     chosen, anything the next session should know.
-   - Commit code + PLAN.md together: `PLAN item N: <short description>`.
+   - Commit the code: `PLAN item N: <short description>`.
+   - Set the item's Status to `done` and fill its Commit property with the short hash.
+   - Create a Session Log entry in Notion (format on the HQ page): what landed, tuning
+     values chosen, anything the next session should know.
 
 One item = one commit. Don't batch items; the point is each change is playable and
 revertable on its own.
 
-## Code rules (summary — full version in PLAN.md conventions)
+## Code rules (summary — full version in the Notion HQ page conventions)
 
 - Pool anything spawned per-hit/per-frame (see `particlePool` / `tracerPool` patterns).
 - Everything added to the scene must be cleaned up in `resetGame` and disposed properly
