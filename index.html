@@ -281,6 +281,7 @@
       <label class="srow">FOV <input id="setFov" type="range" min="60" max="100" step="1"><span class="val" id="setFovVal">78</span></label>
       <label class="srow">VOLUME <input id="setVol" type="range" min="0" max="100" step="1"><span class="val" id="setVolVal">100</span></label>
       <label class="srow">SHADOWS <input id="setShadow" type="checkbox" checked><span class="val"></span></label>
+      <label class="srow">BLOOM <input id="setBloom" type="checkbox" checked><span class="val"></span></label>
       <label class="srow">SHOW FPS <input id="setFps" type="checkbox"><span class="val"></span></label>
     </div>
     <button id="startBtn">► ENTER ARENA</button>
@@ -303,7 +304,10 @@
 </div>
 
 <script type="importmap">
-{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
 </script>
 
 <script>
@@ -320,6 +324,10 @@
 
 <script type="module">
 import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 // ===========================================================================
 // Renderer / scene / camera
@@ -344,7 +352,7 @@ canvas.addEventListener('webglcontextrestored', () => {
 // Settings (persisted)
 // ===========================================================================
 const SETTINGS_KEY = 'neonstrike.settings';
-const defaultSettings = { sens: 5, fov: 78, volume: 100, shadows: true, showFps: false };
+const defaultSettings = { sens: 5, fov: 78, volume: 100, shadows: true, bloom: true, showFps: false };
 let settings;
 try { settings = { ...defaultSettings, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}) }; }
 catch { settings = { ...defaultSettings }; }
@@ -357,6 +365,22 @@ scene.background = new THREE.Color(0x05060c);
 scene.fog = new THREE.FogExp2(0x05060c, 0.018);
 
 const camera = new THREE.PerspectiveCamera(settings.fov, window.innerWidth / window.innerHeight, 0.1, 500);
+
+// Post-processing: bloom composer, used instead of renderer.render when settings.bloom is on.
+// samples: 4 keeps MSAA on the composer path (plain render targets have none).
+const composerRT = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight,
+  { type: THREE.HalfFloatType, samples: 4 });
+const composer = new EffectComposer(renderer, composerRT);
+composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+composer.setSize(window.innerWidth, window.innerHeight);
+composer.addPass(new RenderPass(scene, camera));
+// Threshold 0.2 (not the usual ~0.85): the neon palette is saturated but mid-luminance in
+// linear space (hot pink #ff2e88 ≈ 0.25), while the arena itself sits well below 0.1 —
+// this catches every basic-material/emissive glow without blooming the dark scene.
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.4, 0.2);
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());   // sRGB conversion so colors match the non-bloom path
 
 scene.add(new THREE.AmbientLight(0x335577, 0.6));
 const key = new THREE.DirectionalLight(0x88ccff, 0.8);
@@ -2267,7 +2291,7 @@ function animate() {
   let dt = raw;
   if (state.slowmo > 0) { state.slowmo -= raw; dt = raw * 0.3; }   // boss-kill slow-mo
   if (state.running && !state.paused && !state.choosing) update(dt);
-  renderer.render(scene, camera);
+  if (settings.bloom) composer.render(); else renderer.render(scene, camera);
   if (settings.showFps) {
     fpsFrames++; fpsTime += raw;
     if (fpsTime >= 0.5) { fpsEl.textContent = Math.round(fpsFrames / fpsTime) + ' FPS'; fpsFrames = 0; fpsTime = 0; }
@@ -2356,11 +2380,12 @@ renderBest();
 // ----- settings panel wiring -----
 (function bindSettings() {
   const el = id => document.getElementById(id);
-  const sens = el('setSens'), fov = el('setFov'), vol = el('setVol'), shadow = el('setShadow'), fps = el('setFps');
+  const sens = el('setSens'), fov = el('setFov'), vol = el('setVol'), shadow = el('setShadow'),
+        bloom = el('setBloom'), fps = el('setFps');
   sens.value = settings.sens; el('setSensVal').textContent = settings.sens;
   fov.value = settings.fov; el('setFovVal').textContent = settings.fov;
   vol.value = settings.volume; el('setVolVal').textContent = settings.volume;
-  shadow.checked = settings.shadows; fps.checked = settings.showFps;
+  shadow.checked = settings.shadows; bloom.checked = settings.bloom; fps.checked = settings.showFps;
   sens.addEventListener('input', () => { settings.sens = +sens.value; el('setSensVal').textContent = sens.value; saveSettings(); });
   fov.addEventListener('input', () => {
     settings.fov = +fov.value; el('setFovVal').textContent = fov.value;
@@ -2370,6 +2395,9 @@ renderBest();
   shadow.addEventListener('change', () => {
     settings.shadows = shadow.checked; renderer.shadowMap.enabled = shadow.checked; renderer.shadowMap.needsUpdate = true;
     scene.traverse(o => { if (o.material) o.material.needsUpdate = true; }); saveSettings();
+  });
+  bloom.addEventListener('change', () => {
+    settings.bloom = bloom.checked; saveSettings();
   });
   fps.addEventListener('change', () => {
     settings.showFps = fps.checked; document.body.classList.toggle('showfps', fps.checked); saveSettings();
@@ -2490,6 +2518,8 @@ window.addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  composer.setSize(window.innerWidth, window.innerHeight);
 });
 
 // Engine booted — cancel the CDN-failure watchdog.
