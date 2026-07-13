@@ -1005,6 +1005,81 @@ function spawnDamageNumber(pos, dmg, crit) {
   scene.add(s);
   dmgNumbers.push({ sprite: s, life: 0.6 });
 }
+// Death VFX — a kill reads as a detonation: an expanding additive shockwave ring,
+// a hot white billboard flash (the enemy mesh is disposed same-frame, so we can't
+// flash its material — a pooled sprite stands in), and a lingering floor scorch.
+// Shared geometry/textures; per-instance material colour/opacity only. No lights
+// (per-kill glow scales with entity count — additive + bloom carries it instead).
+const SHOCK_LIFE = 0.35, FLASH_LIFE = 0.12, SCORCH_LIFE = 4, SCORCH_COUNT = 16;
+// Shockwave: pooled flat annulus, scales 1→N and fades over SHOCK_LIFE. Pop-based
+// pool self-bounds to peak concurrent kills (like particlePool).
+const shockRings = [], shockRingPool = [];
+const SHOCK_GEO = new THREE.RingGeometry(0.8, 1.0, 48);
+function spawnShockRing(x, z, color, maxScale) {
+  let m = shockRingPool.pop();
+  if (!m) {
+    m = new THREE.Mesh(SHOCK_GEO, new THREE.MeshBasicMaterial({
+      transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    m.rotation.x = -Math.PI / 2; m.renderOrder = 3; m.frustumCulled = false;
+  }
+  m.position.set(x, 0.06, z); m.scale.set(1, 1, 1);
+  m.material.color.setHex(color); m.material.opacity = 0.9; m.visible = true;
+  scene.add(m);
+  shockRings.push({ mesh: m, life: SHOCK_LIFE, maxScale });
+}
+function freeShockRing(s) { scene.remove(s.mesh); s.mesh.visible = false; shockRingPool.push(s.mesh); }
+// Flash: pooled additive billboard, white-hot, brief pop + slight grow.
+const flashes = [], flashPool = [];
+function makeRadialTex(size, stops) {
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  for (const [at, col] of stops) grad.addColorStop(at, col);
+  g.fillStyle = grad; g.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(c); tex.minFilter = THREE.LinearFilter; return tex;
+}
+const FLASH_TEX = makeRadialTex(64, [[0, 'rgba(255,255,255,1)'], [0.4, 'rgba(255,255,255,0.6)'], [1, 'rgba(255,255,255,0)']]);
+function spawnFlash(x, y, z, size) {
+  let s = flashPool.pop();
+  if (!s) {
+    s = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: FLASH_TEX, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+    s.frustumCulled = false;
+  }
+  s.position.set(x, y, z); s.scale.setScalar(size); s.material.opacity = 1; s.visible = true;
+  scene.add(s);
+  flashes.push({ sprite: s, life: FLASH_LIFE, size });
+}
+function freeFlash(f) { scene.remove(f.sprite); f.sprite.visible = false; flashPool.push(f.sprite); }
+// Scorch: dark circle with a colour-tinted rim (black centre survives the tint since
+// it's a colour*texel multiply; the white rim ring becomes e.color). Fixed 16-slot
+// round-robin buffer — the only long-lived death effect (4s), so it must never grow.
+// Decals live permanently in the scene (offset y=0.03 + renderOrder 2 keeps them above
+// the additive grid at y=0.02 → painter's-order, no z-fight), just hidden when idle.
+const SCORCH_TEX = makeRadialTex(128, [
+  [0.0, 'rgba(0,0,0,0.85)'], [0.55, 'rgba(0,0,0,0.55)'],
+  [0.78, 'rgba(255,255,255,0.9)'], [0.90, 'rgba(120,120,120,0.3)'], [1.0, 'rgba(0,0,0,0)']]);
+const SCORCH_GEO = new THREE.CircleGeometry(1, 32);
+const scorchDecals = [];
+for (let i = 0; i < SCORCH_COUNT; i++) {
+  const m = new THREE.Mesh(SCORCH_GEO, new THREE.MeshBasicMaterial({ map: SCORCH_TEX, transparent: true, depthWrite: false }));
+  m.rotation.x = -Math.PI / 2; m.position.y = 0.03; m.renderOrder = 2; m.frustumCulled = false; m.visible = false;
+  scene.add(m);
+  scorchDecals.push({ mesh: m, life: 0 });
+}
+let scorchIdx = 0;
+function spawnScorch(x, z, color, radius) {
+  const d = scorchDecals[scorchIdx]; scorchIdx = (scorchIdx + 1) % SCORCH_COUNT;
+  d.mesh.position.set(x, 0.03, z); d.mesh.scale.setScalar(radius);
+  d.mesh.material.color.setHex(color); d.mesh.material.opacity = 0.5; d.mesh.visible = true;
+  d.life = SCORCH_LIFE;
+}
+// One call per kill; boss detonations are bigger (ring 12 vs 6).
+function spawnDeathVFX(pos, color, isBoss) {
+  spawnShockRing(pos.x, pos.z, color, isBoss ? 12 : 6);
+  spawnFlash(pos.x, pos.y, pos.z, isBoss ? 5 : 2.2);
+  spawnScorch(pos.x, pos.z, color, isBoss ? 3.2 : 1.4);
+}
 // Dash trail (AFTERBURN) — pooled stretched boxes dropped along the dash path.
 // Each segment keeps its own material (opacity fades per segment); geometry is shared.
 const trailSegs = [], trailSegPool = [];
@@ -1572,6 +1647,7 @@ function killEnemy(enemy, kw, kdist, src) {
   const isBoss = enemy.type === 'boss';
   burst(enemy.mesh.position, enemy.color, isBoss ? 60 : 26, isBoss ? 28 : 20, isBoss ? 0.32 : 0.22);
   emitRipple(enemy.mesh.position.x, enemy.mesh.position.z, isBoss ? 1.8 : 1.0);
+  spawnDeathVFX(enemy.mesh.position, enemy.color, isBoss);
   disposeEnemy(enemy);
   const idx = enemies.indexOf(enemy); if (idx >= 0) enemies.splice(idx, 1);
   sfx.kill(1 + Math.min(state.combo - 1, 12) * 0.06); if (isBoss) { sfx.explode(); state.shake = Math.min(0.8, state.shake + 0.6); state.slowmo = 0.9; }
@@ -2259,6 +2335,26 @@ function update(dt) {
     n.sprite.material.opacity = Math.max(0, n.life / 0.6);
     if (n.life <= 0) { scene.remove(n.sprite); n.sprite.visible = false; dmgNumberPool.push(n.sprite); dmgNumbers.splice(i, 1); }
   }
+  // ----- death VFX: shockwave rings / hot flashes / scorch decals -----
+  for (let i = shockRings.length - 1; i >= 0; i--) {
+    const r = shockRings[i]; r.life -= dt;
+    const p = 1 - Math.max(0, r.life) / SHOCK_LIFE;
+    const s = 1 + p * (r.maxScale - 1);
+    r.mesh.scale.set(s, s, 1); r.mesh.material.opacity = 0.9 * (1 - p);
+    if (r.life <= 0) { freeShockRing(r); shockRings.splice(i, 1); }
+  }
+  for (let i = flashes.length - 1; i >= 0; i--) {
+    const f = flashes[i]; f.life -= dt;
+    const p = 1 - Math.max(0, f.life) / FLASH_LIFE;
+    f.sprite.material.opacity = 1 - p; f.sprite.scale.setScalar(f.size * (1 + p * 0.6));
+    if (f.life <= 0) { freeFlash(f); flashes.splice(i, 1); }
+  }
+  for (let i = 0; i < scorchDecals.length; i++) {
+    const d = scorchDecals[i]; if (d.life <= 0) continue;
+    d.life -= dt;
+    d.mesh.material.opacity = 0.5 * Math.max(0, d.life) / SCORCH_LIFE;
+    if (d.life <= 0) d.mesh.visible = false;
+  }
 
   pink.intensity = 0.7 + Math.sin(t * 2) * 0.2;
   cyan.intensity = 0.7 + Math.cos(t * 2.3) * 0.2;
@@ -2479,6 +2575,9 @@ function resetGame() {
   particles.forEach(p => { scene.remove(p.mesh); p.mesh.visible = false; particlePool.push(p.mesh); }); particles.length = 0;
   tracers.forEach(tr => { scene.remove(tr.line); tr.line.visible = false; tracerPool.push(tr.line); }); tracers.length = 0;
   dmgNumbers.forEach(n => { scene.remove(n.sprite); n.sprite.visible = false; dmgNumberPool.push(n.sprite); }); dmgNumbers.length = 0;
+  shockRings.forEach(freeShockRing); shockRings.length = 0;
+  flashes.forEach(freeFlash); flashes.length = 0;
+  scorchDecals.forEach(d => { d.life = 0; d.mesh.visible = false; }); scorchIdx = 0;
   rockets.forEach(freeRocket); rockets.length = 0;
   enemyShots.forEach(freeEnemyShot); enemyShots.length = 0;
   pickups.forEach(disposePickup); pickups.length = 0;
