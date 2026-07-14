@@ -1,5 +1,7 @@
 # NEON STRIKE — Feature Roadmap
 
+**▶ Live site:** https://lustrous-chimera-efa4db.netlify.app/ — hosted on Netlify, auto-deploys on every push to `main` (see `netlify.toml`).
+
 **The roadmap moved to Notion on 2026-07-12 and is managed there.** This file is only a
 pointer; do not add items or session-log entries here.
 

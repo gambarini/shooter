@@ -4,7 +4,7 @@ A single-file 3D arena wave shooter — clear the arena, switch weapons, survive
 Built with [three.js](https://threejs.org/) and a whole lot of neon. No build step, no
 dependencies, no bundler: the entire game is one `index.html`.
 
-**▶ Play:** _live link coming once Netlify is connected_
+**▶ Play:** <https://lustrous-chimera-efa4db.netlify.app/>
 
 ## Controls
 
