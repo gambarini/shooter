@@ -21,7 +21,12 @@
   # Netlify's clone is shallow and may not fetch tags, so `git describe --tags`
   # silently comes up empty without the explicit fetch below (the badge would
   # then show a bare commit hash forever instead of the real version).
-  command = "git fetch --tags --force 2>/dev/null; VER=$(git describe --tags --always --dirty 2>/dev/null || echo ${COMMIT_REF:0:7}) && mkdir -p dist && sed \"s/__VERSION__/$VER/\" index.html > dist/index.html"
+  #
+  # The sed pattern is scoped to ">__VERSION__<" (the badge divs), NOT a bare
+  # "__VERSION__" — a bare match also rewrites the JS placeholder-guard's own
+  # string literal (`el.textContent === '__VERSION__'`), which then immediately
+  # flips the freshly-stamped badge back to "dev" at page load.
+  command = "git fetch --tags --force 2>/dev/null; VER=$(git describe --tags --always --dirty 2>/dev/null || echo ${COMMIT_REF:0:7}) && mkdir -p dist && sed \"s/>__VERSION__</>$VER</\" index.html > dist/index.html"
 
 # Caching: index.html must revalidate on every request so a fresh deploy shows up
 # immediately (no stale HTML served from the CDN edge). There are no fingerprinted
