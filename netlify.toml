@@ -1,0 +1,15 @@
+# Netlify configuration for NEON STRIKE.
+#
+# This is a no-build, single-file static site: index.html lives at the repo
+# root and pulls three.js from the unpkg CDN over HTTPS. There is nothing to
+# compile, bundle, or transpile.
+#
+# `publish = "."` serves the repo root as-is. `command = ""` explicitly tells
+# Netlify NOT to run a build step — this defuses the main footgun of deploying
+# a build-less site, where Netlify otherwise tries to auto-detect a framework
+# build and fails. No _redirects/_headers are needed: this is not an SPA, and
+# the CDN import resolves fine under Netlify's default headers.
+
+[build]
+  publish = "."
+  command = ""
