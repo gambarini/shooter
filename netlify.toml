@@ -18,3 +18,39 @@
 [build]
   publish = "dist"
   command = "mkdir -p dist && cp index.html dist/"
+
+# Caching: index.html must revalidate on every request so a fresh deploy shows up
+# immediately (no stale HTML served from the CDN edge). There are no fingerprinted
+# local assets to cache long-lived — three.js comes from unpkg with its own caching.
+# Netlify serves "/" from index.html, so both paths get the rule (they merge with
+# the /* security block below).
+[[headers]]
+  for = "/"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+# Baseline security headers for every response.
+#
+# The Content-Security-Policy is the delicate one — it must NOT break the game, which
+# loads entirely inline plus three.js from the unpkg CDN:
+#   - script-src 'unsafe-inline'      -> the inline importmap, watchdog, and module scripts
+#                                        (an importmap is an inline script to CSP; do NOT add a
+#                                         nonce/hash — that makes browsers ignore 'unsafe-inline'
+#                                         and the importmap + module die)
+#   - script-src https://unpkg.com    -> ES-module `import` fetches are governed by script-src
+#   - connect-src https://unpkg.com   -> belt-and-suspenders for the module fetch
+#   - style-src 'unsafe-inline'       -> the inline <style> block
+#   - img-src data:                   -> the inline favicon data-URI
+# WebGL shader compile and Web Audio synthesis need no CSP allowances (no eval, no blob workers).
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "no-referrer"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://unpkg.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
