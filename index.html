@@ -400,7 +400,7 @@ const bloomPass = new UnrealBloomPass(
 composer.addPass(bloomPass);
 composer.addPass(new OutputPass());   // sRGB conversion so colors match the non-bloom path
 
-scene.add(new THREE.AmbientLight(0x335577, 0.6));
+const ambient = new THREE.AmbientLight(0x335577, 0.6); scene.add(ambient);
 const key = new THREE.DirectionalLight(0x88ccff, 0.8);
 key.position.set(20, 40, 10);
 key.castShadow = true;
@@ -410,6 +410,77 @@ key.shadow.camera.top = 60; key.shadow.camera.bottom = -60;
 scene.add(key);
 const pink = new THREE.PointLight(0xff2e88, 0.8, 120); pink.position.set(-30, 12, -20); scene.add(pink);
 const cyan = new THREE.PointLight(0x00f0ff, 0.8, 120); cyan.position.set(30, 12, 20); scene.add(cyan);
+
+// ===========================================================================
+// Arena mood (item 28) — per-wave hue drift + boss/mutator lighting shifts.
+// Reuses the pink/cyan point lights, key directional, ambient, and scene fog —
+// NO new lights (point lights are a hard perf budget). A single moodFrom→moodTo
+// pair is lerped by a timer in update(); computeMood() runs only on wave
+// transitions, so its Color .set/.setHSL work never touches the per-frame path.
+// ===========================================================================
+const MOOD_DUR = 1.6;                                  // transition seconds
+const basePinkHSL = pink.color.getHSL({ h: 0, s: 0, l: 0 });
+const baseCyanHSL = cyan.color.getHSL({ h: 0, s: 0, l: 0 });
+const baseFogColor = scene.fog.color.clone();          // 0x05060c near-black
+const baseFogDensity = scene.fog.density;              // 0.018
+const baseAmbient = ambient.intensity;                 // 0.6
+const baseKeyColor = key.color.clone();                // 0x88ccff cool
+const MOOD_BOSS = new THREE.Color(0xff2848);           // menace red the key + fog pull toward
+const _moodMut = new THREE.Color();                    // temp for mutator hex, reused
+function makeMood() {
+  return { pink: new THREE.Color(), cyan: new THREE.Color(), fog: new THREE.Color(),
+           key: new THREE.Color(), fogDensity: 0, ambient: 0 };
+}
+const moodFrom = makeMood(), moodTo = makeMood();
+let moodT = MOOD_DUR;                                   // start settled (lights hold base)
+function computeMood(n, mut, out) {
+  // Hue drifts ±30° on a 15-wave cycle so waves 1/6/11 read as distinct moods
+  // (0° / +26° / −26°) while staying anchored to the pink/cyan neon identity.
+  const off = (30 / 360) * Math.sin((n - 1) * (Math.PI * 2 / 15));
+  out.pink.setHSL(basePinkHSL.h + off, basePinkHSL.s, basePinkHSL.l);
+  out.cyan.setHSL(baseCyanHSL.h + off, baseCyanHSL.s, baseCyanHSL.l);
+  out.key.copy(baseKeyColor);
+  out.ambient = baseAmbient * (1 - Math.min(0.18, (n - 1) * 0.012));   // dims slightly as waves climb
+  out.fogDensity = baseFogDensity * (1 + Math.min(0.4, (n - 1) * 0.028)); // thickens as waves climb
+  out.fog.copy(baseFogColor).lerp(out.pink, 0.07);     // faint warm horizon that drifts with the hue
+  if (n % 5 === 0) {                                    // boss wave: darker + menacing warm key
+    out.ambient *= 0.8;
+    out.key.lerp(MOOD_BOSS, 0.55);
+    out.fog.copy(baseFogColor).lerp(MOOD_BOSS, 0.12);
+  }
+  if (mut) {                                            // mutator wave: infect lights + fog with its color
+    _moodMut.set(mut.color);
+    out.pink.lerp(_moodMut, 0.6);
+    out.cyan.lerp(_moodMut, 0.6);
+    out.key.lerp(_moodMut, 0.4);
+    out.fog.copy(baseFogColor).lerp(_moodMut, 0.3);
+  }
+  return out;
+}
+function applyMood(k) {
+  const e = k * k * (3 - 2 * k);                        // smoothstep — no pop at either end
+  pink.color.lerpColors(moodFrom.pink, moodTo.pink, e);
+  cyan.color.lerpColors(moodFrom.cyan, moodTo.cyan, e);
+  key.color.lerpColors(moodFrom.key, moodTo.key, e);
+  ambient.intensity = moodFrom.ambient + (moodTo.ambient - moodFrom.ambient) * e;
+  scene.fog.color.lerpColors(moodFrom.fog, moodTo.fog, e);
+  scene.fog.density = moodFrom.fogDensity + (moodTo.fogDensity - moodFrom.fogDensity) * e;
+  scene.background.copy(scene.fog.color);
+}
+// Kick off a 1.6 s lerp toward wave n's mood (instant=true snaps, for resetGame).
+function setMood(n, instant) {
+  computeMood(n, state.mutator, moodTo);
+  moodFrom.pink.copy(pink.color); moodFrom.cyan.copy(cyan.color);
+  moodFrom.key.copy(key.color);   moodFrom.fog.copy(scene.fog.color);
+  moodFrom.ambient = ambient.intensity; moodFrom.fogDensity = scene.fog.density;
+  moodT = instant ? MOOD_DUR : 0;
+  if (instant) applyMood(1);
+}
+function advanceMood(dt) {
+  if (moodT >= MOOD_DUR) return;                        // settled — nothing to write
+  moodT = Math.min(MOOD_DUR, moodT + dt);
+  applyMood(moodT / MOOD_DUR);
+}
 
 // ===========================================================================
 // Arena
@@ -1402,6 +1473,7 @@ const MUTATORS = [
 function clearMutator() {
   if (!state.mutator) return;
   state.mutator = null;
+  setMood(state.wave);   // item 28: lerp the "infection" back out to the plain wave mood
   if (!reloading) updateAmmoUI();   // FRENZY showed ∞ — restore the real counter
 }
 function startWave(n) {
@@ -1427,6 +1499,7 @@ function startWave(n) {
   }
   if (n % 2 === 0) spawnRandomPickup('health');
   if (n % 5 === 0) { spawnBoss(n); spawnRandomPickup('ammo'); }
+  setMood(n);   // item 28: drift arena lighting/fog toward this wave's mood (mutator already set above)
 }
 function nextWaveCheck() {
   if (state.running && state.toSpawn === 0 && enemies.length === 0 && state.betweenWaves <= 0) {
@@ -1925,6 +1998,7 @@ function update(dt) {
   state.time += dt;
   const t = state.time;
   gridUniforms.uTime.value = t;
+  advanceMood(dt);   // item 28: advance any in-flight arena-mood transition
 
   // ----- movement -----
   const sprint = keys['ShiftLeft'] || keys['ShiftRight'] || touchSprint;
@@ -2701,6 +2775,7 @@ function resetGame() {
   state.score = 0; state.wave = 0; state.combo = 1; state.comboTimer = 0;
   state.toSpawn = 0; state.betweenWaves = 0; state.pickupTimer = 8; state.shake = 0;
   state.time = 0; state.slowmo = 0; state.choosing = false; state.rerolled = false; state.mutator = null;
+  setMood(1, true);   // item 28: snap arena mood back to the wave-1 baseline on restart
   gridUniforms.uTime.value = 0; gridUniforms.uRipples.value.forEach(r => r.set(0, 0, -1e3, 0)); rippleIdx = 0;
   state.lastHitBy = null; state.upgrades = [];
   state.stats = { shots: 0, hits: 0, crits: 0, kills: 0, bestCombo: 1, style: 0, dmgDealt: 0, dmgTaken: 0, wkills: {} };
