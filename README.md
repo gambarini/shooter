@@ -45,5 +45,6 @@ pointer lock and module imports.
 
 ## Deploy
 
-Hosted on Netlify as a no-build static site — `netlify.toml` publishes the repo root with
-no build command. Every push to `main` auto-deploys.
+Hosted on Netlify as a no-build static site. `netlify.toml` stages just `index.html` into a
+`dist/` publish directory (a one-line copy — no compile/bundle), so the live site ships only
+the game and none of the repo's dev docs. Every push to `main` auto-deploys.

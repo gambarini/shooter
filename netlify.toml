@@ -1,15 +1,20 @@
 # Netlify configuration for NEON STRIKE.
 #
-# This is a no-build, single-file static site: index.html lives at the repo
-# root and pulls three.js from the unpkg CDN over HTTPS. There is nothing to
-# compile, bundle, or transpile.
+# This is a no-build, single-file static site: the entire game is index.html
+# (inline favicon data-URI, inline importmap, three.js from the unpkg CDN). It
+# is the ONLY file the live site needs.
 #
-# `publish = "."` serves the repo root as-is. `command = ""` explicitly tells
-# Netlify NOT to run a build step — this defuses the main footgun of deploying
-# a build-less site, where Netlify otherwise tries to auto-detect a framework
-# build and fails. No _redirects/_headers are needed: this is not an SPA, and
-# the CDN import resolves fine under Netlify's default headers.
+# The repo root also holds dev-only files — CLAUDE.md, PLAN.md, README.md,
+# Makefile, .gitignore — that should not be published. Serving the root with
+# `publish = "."` would leak all of them to the live URL.
+#
+# So the "build" is a one-line copy that stages just index.html into dist/, and
+# `publish = "dist"` ships that directory alone. This isn't a real build step
+# (no compile/bundle/transpile) and it still defuses Netlify's framework
+# auto-detection, since specifying an explicit command disables it. No
+# _redirects/_headers are needed: this is not an SPA, and the CDN import
+# resolves fine under Netlify's default headers.
 
 [build]
-  publish = "."
-  command = ""
+  publish = "dist"
+  command = "mkdir -p dist && cp index.html dist/"
