@@ -46,5 +46,14 @@ pointer lock and module imports.
 ## Deploy
 
 Hosted on Netlify as a no-build static site. `netlify.toml` stages just `index.html` into a
-`dist/` publish directory (a one-line copy — no compile/bundle), so the live site ships only
-the game and none of the repo's dev docs. Every push to `main` auto-deploys.
+`dist/` publish directory, so the live site ships only the game and none of the repo's dev
+docs. Every push to `main` auto-deploys — tags are not a separate deploy trigger.
+
+The build also stamps a version onto the page: `index.html` has a literal `__VERSION__`
+placeholder (small badge on the start/pause cards), and the Netlify build command runs
+`git describe --tags` and `sed`s the result in, so the live badge always self-reports
+exactly what's deployed. Serving the raw file locally (no build step) shows `dev` instead.
+
+Versioning is `vMAJOR.MINOR.PATCH` git tags, staying in `v0.x` pre-1.0. Every roadmap
+item's close-out (see `CLAUDE.md`) tags its own commit — a shipped feature bumps MINOR, a
+bugfix bumps PATCH — and pushes the tag with `git push --tags`.

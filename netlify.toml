@@ -8,16 +8,20 @@
 # Makefile, .gitignore — that should not be published. Serving the root with
 # `publish = "."` would leak all of them to the live URL.
 #
-# So the "build" is a one-line copy that stages just index.html into dist/, and
-# `publish = "dist"` ships that directory alone. This isn't a real build step
-# (no compile/bundle/transpile) and it still defuses Netlify's framework
-# auto-detection, since specifying an explicit command disables it. No
-# _redirects/_headers are needed: this is not an SPA, and the CDN import
-# resolves fine under Netlify's default headers.
+# So the "build" stages just index.html into dist/, stamping the __VERSION__
+# placeholder (see the version badge on the start/pause cards) with the
+# nearest git tag along the way, and `publish = "dist"` ships that directory
+# alone. This isn't a real build step (no compile/bundle/transpile) and it
+# still defuses Netlify's framework auto-detection, since specifying an
+# explicit command disables it. No _redirects/_headers are needed: this is
+# not an SPA, and the CDN import resolves fine under Netlify's default headers.
 
 [build]
   publish = "dist"
-  command = "mkdir -p dist && cp index.html dist/"
+  # Netlify's clone is shallow and may not fetch tags, so `git describe --tags`
+  # silently comes up empty without the explicit fetch below (the badge would
+  # then show a bare commit hash forever instead of the real version).
+  command = "git fetch --tags --force 2>/dev/null; VER=$(git describe --tags --always --dirty 2>/dev/null || echo ${COMMIT_REF:0:7}) && mkdir -p dist && sed \"s/__VERSION__/$VER/\" index.html > dist/index.html"
 
 # Caching: index.html must revalidate on every request so a fresh deploy shows up
 # immediately (no stale HTML served from the CDN edge). There are no fingerprinted

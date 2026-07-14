@@ -143,8 +143,11 @@
              background: radial-gradient(circle at 50% 40%, rgba(0,40,60,.55), rgba(5,6,12,.92));
              backdrop-filter: blur(3px); text-align:center; }
   #overlay.hidden { display:none; }
-  .card { max-width: 600px; padding: 10px 30px; }
+  .card { max-width: 600px; padding: 10px 30px; position:relative; }
   .card.hidden { display:none; }
+  .verbadge { position:absolute; bottom:6px; right:14px; font-size:11px; letter-spacing:1px;
+              color:#6fa8c9; text-shadow:0 0 6px rgba(0,240,255,.6), 0 0 10px rgba(255,46,136,.3);
+              opacity:.75; pointer-events:none; }
   h1 { font-size: 64px; font-weight: 900; letter-spacing: 6px; line-height: 1;
        background: linear-gradient(90deg,#00f0ff,#ff2e88); -webkit-background-clip:text; background-clip:text;
        color: transparent; filter: drop-shadow(0 0 18px rgba(0,240,255,.5)); }
@@ -282,6 +285,7 @@
   <div class="card" id="startCard">
     <h1>NEON STRIKE</h1>
     <div class="sub">CLEAR THE ARENA. SWITCH WEAPONS. SURVIVE THE SWARM.</div>
+    <div class="verbadge">__VERSION__</div>
     <div class="best" id="bestWrap" style="display:none">BEST <b id="bestScore">0</b></div>
     <div class="keys">
       <div class="key"><b>WASD</b> Move</div>
@@ -319,6 +323,7 @@
   <div class="card hidden" id="pauseCard">
     <h1>PAUSED</h1>
     <div class="sub">Take a breath.</div>
+    <div class="verbadge">__VERSION__</div>
     <button id="resumeBtn">► RESUME</button>
   </div>
 </div>
@@ -339,6 +344,12 @@
   window.addEventListener('error', e => {
     if (e && (e.filename || '').includes('three') && !window.__neonReady)
       document.getElementById('fatal').classList.add('show');
+  });
+  // Netlify's build stamps __VERSION__ at deploy time; serving the raw file
+  // (file:// or `python3 -m http.server`) never runs that step, so fall back
+  // to a literal "dev" instead of showing the unresolved placeholder.
+  document.querySelectorAll('.verbadge').forEach(el => {
+    if (el.textContent === '__VERSION__') el.textContent = 'dev';
   });
 </script>
 
