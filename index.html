@@ -144,6 +144,8 @@
              backdrop-filter: blur(3px); text-align:center; }
   #overlay.hidden { display:none; }
   .card { max-width: 600px; padding: 10px 30px; position:relative; }
+  /* Death screen can grow tall (stats + upgrades + global top-10); keep it on-screen on mobile. */
+  #overCard { max-height:94vh; overflow-y:auto; }
   .card.hidden { display:none; }
   .verbadge { position:absolute; bottom:6px; right:14px; font-size:11px; letter-spacing:1px;
               color:#6fa8c9; text-shadow:0 0 6px rgba(0,240,255,.6), 0 0 10px rgba(255,46,136,.3);
@@ -231,6 +233,21 @@
   .submitnote.pending { color:#6f93a6; }
   .submitnote.ok { color:#7be0a0; text-shadow:0 0 8px rgba(90,255,160,.4); }
   .submitnote.off { color:#ff8fb4; text-shadow:0 0 8px rgba(255,46,136,.4); }
+  /* Global leaderboard on the death screen (item 38) */
+  #overGlobal { margin:0 auto 18px; max-width:460px; }
+  #overRank { font-size:13px; letter-spacing:2px; color:#8fb6c9; margin:0 0 12px; }
+  #overRank b { color:#fff; font-size:19px; text-shadow:0 0 12px var(--neon); }
+  #overRank.first b { color:#ff2e88; text-shadow:0 0 12px rgba(255,46,136,.7); }
+  #overBoard { width:100%; border-collapse:collapse; font-size:12px; letter-spacing:1px; }
+  #overBoard th { font-size:9px; letter-spacing:2px; color:#5f7f92; font-weight:700;
+                  text-align:right; padding:0 8px 6px; border-bottom:1px solid rgba(0,240,255,.2); }
+  #overBoard th:nth-child(2) { text-align:left; }
+  #overBoard td { padding:5px 8px; color:#9fe9ff; text-align:right; }
+  #overBoard td:first-child { color:#6f93a6; }
+  #overBoard td:nth-child(2) { text-align:left; color:#bfe9ff;
+                               max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #overBoard tr.you td { color:#fff; text-shadow:0 0 8px rgba(255,46,136,.6); }
+  #overBoard tr.you td:first-child { color:#ff2e88; }
   #pauseHint { position:absolute; top:22px; left:50%; transform:translateX(-50%); margin-top:54px;
                font-size:11px; color:#6f93a6; letter-spacing:2px; pointer-events:none; }
   #fps { position:absolute; top:8px; right:8px; font-size:11px; color:#6f93a6; letter-spacing:1px;
@@ -339,6 +356,10 @@
     <div class="best" id="overBest">BEST <b>0</b></div>
     <div class="sub" id="overSub">You reached wave 1.</div>
     <div class="submitnote" id="overSubmit"></div>
+    <div id="overGlobal" style="display:none">
+      <div id="overRank"></div>
+      <table id="overBoard"><tbody></tbody></table>
+    </div>
     <button id="againBtn">↻ RUN IT BACK</button>
   </div>
   <div class="card hidden" id="pauseCard">
@@ -2751,6 +2772,11 @@ handleInput.addEventListener('input', () => {
 // RELATIVE path only: the CSP is connect-src 'self', so it must be same-origin.
 async function submitScore(name, score, wave) {
   const note = document.getElementById('overSubmit');
+  const global = document.getElementById('overGlobal');
+  // Hide the previous run's board SYNCHRONOUSLY (before the await) — gameOver()
+  // renders the card immediately, so a second death would otherwise flash the
+  // last run's table until this resolves.
+  global.style.display = 'none';
   note.className = 'submitnote pending';
   note.textContent = 'SUBMITTING SCORE…';
   try {
@@ -2762,13 +2788,57 @@ async function submitScore(name, score, wave) {
     if (!r.ok) throw new Error('http ' + r.status);
     const data = await r.json();
     note.className = 'submitnote ok';
-    note.textContent = Number.isFinite(data && data.rank)
-      ? `SUBMITTED · GLOBAL RANK #${data.rank} OF ${data.total}`
-      : 'SCORE SUBMITTED';
+    note.textContent = 'SCORE SUBMITTED';
+    // The POST already carries {rank,total,top} — render the board with no 2nd
+    // request. renderGlobalBoard reveals #overGlobal; leave it hidden on failure.
+    renderGlobalBoard(data, name || 'ANON', score, wave);
   } catch {
     note.className = 'submitnote off';
     note.textContent = 'OFFLINE — SCORE NOT SUBMITTED';
+    // Global section stays hidden; the local recap (best/stats) is untouched.
   }
+}
+
+// Render the "You ranked #N of M" line + neon top-10 table from a POST response.
+// Bails (section stays hidden) if the payload is missing the fields it needs, so
+// a malformed 200 degrades exactly like a network failure.
+function renderGlobalBoard(data, name, score, wave) {
+  const global = document.getElementById('overGlobal');
+  const rankEl = document.getElementById('overRank');
+  const body = document.querySelector('#overBoard tbody');
+  const top = data && Array.isArray(data.top) ? data.top : null;
+  const total = data && Number.isFinite(data.total) ? data.total : null;
+  if (!top || total == null) return;   // unusable payload — keep it hidden
+
+  // Headline. total<=1 means this run is the only entry: "be the first".
+  if (total <= 1) {
+    rankEl.className = 'first';
+    rankEl.innerHTML = 'BE THE FIRST — <b>#1</b>!';
+  } else {
+    rankEl.className = '';
+    const rank = Number.isFinite(data.rank) ? data.rank : '—';
+    rankEl.innerHTML = `YOU RANKED <b>#${rank}</b> OF <b>${total}</b> WORLDWIDE`;
+  }
+
+  // Top-10 table. Highlight the player's own row: first entry matching this run
+  // by name+score+wave (rows carry no id, and array index ≠ rank under ties).
+  let matched = false;
+  const rows = top.map((r, i) => {
+    const isYou = !matched && r.name === name && r.score === score && r.wave === wave;
+    if (isYou) matched = true;
+    return `<tr class="${isYou ? 'you' : ''}"><td>${i + 1}</td><td>${escapeHtml(r.name)}</td>` +
+           `<td>${r.score}</td><td>${r.wave}</td></tr>`;
+  }).join('');
+  body.innerHTML =
+    '<tr><th>#</th><th>PILOT</th><th>SCORE</th><th>WAVE</th></tr>' + rows;
+  global.style.display = '';
+}
+
+// Escape a leaderboard name for innerHTML. Names are already sanitized server-side
+// (control chars + <> stripped), but this crosses a trust boundary, so escape.
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 // ----- settings panel wiring -----
