@@ -216,6 +216,21 @@
   .srow .val { min-width:44px; text-align:right; color:#fff; font-variant-numeric:tabular-nums; }
   .best { color:#ffd27a; font-size:14px; letter-spacing:2px; margin:6px 0 18px; text-shadow:0 0 10px #ffae3a; }
   .best b { color:#fff; font-size:22px; }
+  /* Player handle entry (item 37) — neon text field on the start card. */
+  .handlerow { display:flex; align-items:center; justify-content:center; gap:12px; margin:0 auto 22px;
+               font-size:13px; letter-spacing:2px; color:#9fe9ff; }
+  .handlerow label { text-shadow:0 0 8px var(--neon); }
+  #handleInput { pointer-events:auto; width:170px; padding:9px 12px; font:inherit; font-size:14px;
+                 letter-spacing:2px; text-align:center; text-transform:uppercase; color:#fff; caret-color:#00f0ff;
+                 background:rgba(0,20,32,.55); border:1px solid rgba(0,240,255,.4); border-radius:8px;
+                 box-shadow:inset 0 0 12px rgba(0,240,255,.2); outline:none; }
+  #handleInput:focus { border-color:#00f0ff; box-shadow:inset 0 0 12px rgba(0,240,255,.2), 0 0 16px rgba(0,240,255,.5); }
+  #handleInput::placeholder { color:#5a7f92; letter-spacing:2px; }
+  /* Death-card submit status (item 37) — fixed-height slot so the card never reflows. */
+  .submitnote { min-height:15px; font-size:12px; letter-spacing:2px; margin:0 0 16px; }
+  .submitnote.pending { color:#6f93a6; }
+  .submitnote.ok { color:#7be0a0; text-shadow:0 0 8px rgba(90,255,160,.4); }
+  .submitnote.off { color:#ff8fb4; text-shadow:0 0 8px rgba(255,46,136,.4); }
   #pauseHint { position:absolute; top:22px; left:50%; transform:translateX(-50%); margin-top:54px;
                font-size:11px; color:#6f93a6; letter-spacing:2px; pointer-events:none; }
   #fps { position:absolute; top:8px; right:8px; font-size:11px; color:#6f93a6; letter-spacing:1px;
@@ -308,6 +323,11 @@
       <label class="srow">BLOOM <input id="setBloom" type="checkbox" checked><span class="val"></span></label>
       <label class="srow">SHOW FPS <input id="setFps" type="checkbox"><span class="val"></span></label>
     </div>
+    <div class="handlerow">
+      <label for="handleInput">HANDLE</label>
+      <input id="handleInput" type="text" maxlength="12" placeholder="ANON"
+             autocomplete="off" spellcheck="false" autocapitalize="characters">
+    </div>
     <button id="startBtn">► ENTER ARENA</button>
   </div>
   <div class="card hidden" id="overCard">
@@ -318,6 +338,7 @@
     <div id="overUps"></div>
     <div class="best" id="overBest">BEST <b>0</b></div>
     <div class="sub" id="overSub">You reached wave 1.</div>
+    <div class="submitnote" id="overSubmit"></div>
     <button id="againBtn">↻ RUN IT BACK</button>
   </div>
   <div class="card hidden" id="pauseCard">
@@ -774,6 +795,9 @@ let mouseDown = false;
 
 let wantDash = false, wantUlt = false;
 document.addEventListener('keydown', e => {
+  // Let text fields (the handle input) receive keys — otherwise typing would
+  // trigger reload/pause/weapon-swap and Space would be preventDefault'd away.
+  if (e.target && e.target.tagName === 'INPUT') return;
   keys[e.code] = true;
   if (state.choosing) {   // upgrade cards take over 1/2/3 (and R = reroll) while open
     if (e.code === 'Digit1') pickUpgrade(0);
@@ -2703,6 +2727,50 @@ function renderBest() {
 }
 renderBest();
 
+// ----- player handle + global leaderboard submit (item 37) -----
+// Handle persists under its own key, mirroring the BEST_KEY pattern. The start
+// card owns the input; gameOver() fires the run at /api/scores.
+const NAME_KEY = 'neonstrike.name';
+let playerName = '';
+try { playerName = localStorage.getItem(NAME_KEY) || ''; } catch {}
+const handleInput = document.getElementById('handleInput');
+handleInput.value = playerName;
+handleInput.addEventListener('input', () => {
+  // Uppercase so the stored/submitted value matches the CSS uppercase display —
+  // the leaderboard renders the stored string, so they must agree.
+  handleInput.value = handleInput.value.toUpperCase();
+  playerName = handleInput.value;
+  try { localStorage.setItem(NAME_KEY, playerName); } catch {}
+});
+
+// Fire-and-forget POST of a finished run. Must NEVER break the death screen:
+// every failure mode is caught and shown as a subtle note. Crucially, a non-OK
+// response counts as failure too — the static `python3 -m http.server` (no
+// functions runtime) answers /api/scores with a 404 + HTML body, so we bail on
+// `!r.ok` BEFORE calling r.json() (which would otherwise throw on the HTML).
+// RELATIVE path only: the CSP is connect-src 'self', so it must be same-origin.
+async function submitScore(name, score, wave) {
+  const note = document.getElementById('overSubmit');
+  note.className = 'submitnote pending';
+  note.textContent = 'SUBMITTING SCORE…';
+  try {
+    const r = await fetch('/api/scores', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: name || 'ANON', score, wave }),
+    });
+    if (!r.ok) throw new Error('http ' + r.status);
+    const data = await r.json();
+    note.className = 'submitnote ok';
+    note.textContent = Number.isFinite(data && data.rank)
+      ? `SUBMITTED · GLOBAL RANK #${data.rank} OF ${data.total}`
+      : 'SCORE SUBMITTED';
+  } catch {
+    note.className = 'submitnote off';
+    note.textContent = 'OFFLINE — SCORE NOT SUBMITTED';
+  }
+}
+
 // ----- settings panel wiring -----
 (function bindSettings() {
   const el = id => document.getElementById(id);
@@ -2840,6 +2908,9 @@ function gameOver() {
     (isNewBest ? '★ NEW BEST — ' : '') + `You reached wave ${state.wave}.`;
   startCard.classList.add('hidden'); pauseCard.classList.add('hidden');
   overCard.classList.remove('hidden'); overlay.classList.remove('hidden');
+  // Fire-and-forget: pass the final stats by value so the async resolution
+  // can't read post-reset state. Never awaited — the card is already rendered.
+  submitScore(playerName, state.score, state.wave);
 }
 
 document.getElementById('startBtn').addEventListener('click', startGame);
