@@ -21,7 +21,12 @@ import { getStore } from '@netlify/blobs';
 import { board, insertRun, validateRun } from '../lib/leaderboard-core.mjs';
 
 const STORE = 'leaderboard';
-const KEY = 'runs-v1';
+// 'runs-v1' was the throwaway namespace used to deploy-verify item 36 (it holds
+// ZZTEST/ZZPROBE entries and is now orphaned). 'board-v1' is the clean launch
+// key. Bumping this constant is also the reset mechanism: there is no public
+// delete endpoint by design (an unauthenticated wipe would be a hole), so to
+// clear the board you roll the key.
+const KEY = 'board-v1';
 
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj), {
