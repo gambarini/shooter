@@ -29,8 +29,14 @@ const json = (obj, status = 200) =>
     headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
   });
 
+// STRONG consistency is required, not optional: this is a read-modify-write on a
+// single key. With Blobs' default eventual consistency, a submit reads a stale
+// (often empty) store, so sequential submits clobber each other and GETs lag —
+// verified failing on the first live deploy. Strong reads cost a little latency
+// but keep the board correct. (Concurrent submits can still race last-write-wins;
+// that's the accepted hobby-scale tradeoff, see the header + item 39.)
 async function loadRuns(store) {
-  const data = await store.get(KEY, { type: 'json' });
+  const data = await store.get(KEY, { type: 'json', consistency: 'strong' });
   return Array.isArray(data?.runs) ? data.runs : [];
 }
 
