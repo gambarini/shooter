@@ -1,0 +1,10 @@
+{
+  "name": "neon-strike",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dependencies for the NEON STRIKE serverless leaderboard function only. The game itself is a dependency-free single file (index.html); this exists purely so Netlify installs @netlify/blobs for netlify/functions/scores.mjs at deploy time.",
+  "dependencies": {
+    "@netlify/blobs": "^10.7.9"
+  }
+}

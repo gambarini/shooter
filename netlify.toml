@@ -28,6 +28,18 @@
   # flips the freshly-stamped badge back to "dev" at page load.
   command = "git fetch --tags --force 2>/dev/null; VER=$(git describe --tags --always --dirty 2>/dev/null || echo ${COMMIT_REF:0:7}) && mkdir -p dist && sed \"s/>__VERSION__</>$VER</\" index.html > dist/index.html"
 
+# Serverless: the global-leaderboard endpoint (roadmap item 36 — the project's
+# first backend). `netlify/functions/` is Netlify's default functions directory
+# (stated explicitly here for clarity). scores.mjs is a v2 function that declares
+# its own route via `export const config = { path: "/api/scores" }`, so it is
+# served SAME-ORIGIN at /api/scores — which the game's CSP `connect-src 'self'`
+# already allows, so no CSP change was needed. Functions bundle independently of
+# the static `publish = "dist"` above; the sed-stamp build command never touches
+# them. @netlify/blobs is installed from package.json at deploy time.
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
 # Caching: index.html must revalidate on every request so a fresh deploy shows up
 # immediately (no stale HTML served from the CDN edge). There are no fingerprinted
 # local assets to cache long-lived — three.js comes from unpkg with its own caching.
