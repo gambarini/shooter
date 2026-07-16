@@ -45,7 +45,9 @@ Each session does exactly ONE item:
    - Tag the commit `vMAJOR.MINOR.PATCH` (annotated: `git tag -a v0.x.0 -m "..."`) and
      `git push --tags` — a shipped feature bumps MINOR, a bugfix bumps PATCH, staying in
      `v0.x` pre-1.0. This is the version the live site's badge self-reports (see item 35).
-   - Set the item's Status to `done` and fill its Commit property with the short hash.
+   - Set the item's Status to `done` and fill its `Commit hash` property with the short
+     hash. (The `Commit` column is a read-only formula that renders the hash as a clickable
+     GitHub commit link — don't write to it.)
    - Create a Session Log entry in Notion (format on the HQ page): what landed, tuning
      values chosen, anything the next session should know.
 
