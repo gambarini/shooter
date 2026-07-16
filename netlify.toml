@@ -28,6 +28,16 @@
   # flips the freshly-stamped badge back to "dev" at page load.
   command = "git fetch --tags --force 2>/dev/null; VER=$(git describe --tags --always --dirty 2>/dev/null || echo ${COMMIT_REF:0:7}) && mkdir -p dist && sed \"s/>__VERSION__</>$VER</\" index.html > dist/index.html"
 
+  # Skip the deploy when a push only touched dev-only files (docs, Makefile,
+  # .gitignore) — nothing the live site serves. Netlify's `ignore` command:
+  # exit 0 = cancel the build, non-zero = build. This lists the files changed
+  # since the last deployed commit, strips out the dev-only ones, and cancels
+  # only if nothing deployable is left. It's a DENYLIST, so any new/unlisted
+  # file (index.html, netlify.toml, package.json, netlify/**) still deploys —
+  # the safe default. The `test -n "$CACHED_COMMIT_REF"` guard forces a build
+  # on the first deploy or a cleared cache, when there's no baseline to diff.
+  ignore = '''test -n "$CACHED_COMMIT_REF" && test -z "$(git diff --name-only $CACHED_COMMIT_REF $COMMIT_REF | grep -vE '^(CLAUDE\.md|PLAN\.md|README\.md|Makefile|\.gitignore)$')"'''
+
 # Serverless: the global-leaderboard endpoint (roadmap item 36 — the project's
 # first backend). `netlify/functions/` is Netlify's default functions directory
 # (stated explicitly here for clarity). scores.mjs is a v2 function that declares
