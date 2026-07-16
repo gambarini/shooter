@@ -605,12 +605,15 @@ function emitRipple(x, z, strength) {
 
 const wallMat = new THREE.MeshStandardMaterial({ color: 0x0a1426, emissive: 0x0a3a5c, emissiveIntensity: 0.6,
                                                  metalness: 0.6, roughness: 0.4 });
+// Item 31: all four wall trims share ONE cyan basic material so the living-arena
+// pulse in updateEnv() is a single color write per frame, not one per trim.
+const trimMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff });
+const TRIM_R = 0, TRIM_G = 0.941, TRIM_B = 1;   // base-cyan channels, pulsed against
 const walls = [];           // explicit hitscan target list (no scene scraping)
 function makeWall(w, h, d, x, y, z) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
   m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; scene.add(m);
-  const trim = new THREE.Mesh(new THREE.BoxGeometry(w + 0.2, 0.4, d + 0.2),
-                new THREE.MeshBasicMaterial({ color: 0x00f0ff }));
+  const trim = new THREE.Mesh(new THREE.BoxGeometry(w + 0.2, 0.4, d + 0.2), trimMat);
   trim.position.set(x, h, z); scene.add(trim);
   walls.push(m);
 }
@@ -623,18 +626,108 @@ makeWall(2, wallH, ARENA * 2,  ARENA, wallH / 2, 0);
 const obstacles = [];
 const pillarMat = new THREE.MeshStandardMaterial({ color: 0x111a30, emissive: 0xff2e88, emissiveIntensity: 0.18,
                                                    metalness: 0.5, roughness: 0.5 });
+// Item 31: each pillar cap keeps its OWN pink material (the glitch flicker + boss
+// pulse in updateEnv() target caps individually) — a small fixed count, so per-cap
+// materials are cheap. Collected here for the per-frame writes.
+const pillarCaps = [];
+const CAP_R = 1, CAP_G = 0.180, CAP_B = 0.533;   // base hot-pink channels
 function addPillar(x, z, w, h, d) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), pillarMat);
   m.position.set(x, h / 2, z); m.castShadow = true; m.receiveShadow = true; scene.add(m);
   const cap = new THREE.Mesh(new THREE.BoxGeometry(w + .3, .3, d + .3),
               new THREE.MeshBasicMaterial({ color: 0xff2e88 }));
   cap.position.set(x, h, z); scene.add(cap);
+  pillarCaps.push(cap.material);
   obstacles.push({ mesh: m, hw: w / 2, hd: d / 2, h });
 }
 [
   [-22, -18, 5, 10, 5], [24, -22, 6, 14, 6], [18, 20, 5, 9, 5], [-26, 24, 6, 12, 6],
   [0, 0, 8, 6, 8], [-40, -2, 4, 16, 4], [40, 8, 4, 18, 4], [6, -38, 5, 8, 12], [-10, 40, 12, 7, 5],
 ].forEach(p => addPillar(...p));
+
+// ===========================================================================
+// Living environment (item 31) — the arena idles alive even when you stand still.
+//   • Dust: ONE additive Points cloud drifting through the arena volume (1 draw
+//     call, animated by rotating the whole object — imperfect motion is invisible
+//     at 0.12 opacity).
+//   • Trim pulse + cap glitch are driven per-frame by updateEnv() below.
+// ===========================================================================
+const DUST_COUNT = 300, DUST_Y = 14;
+const dust = (() => {
+  const pos = new Float32Array(DUST_COUNT * 3);
+  for (let i = 0; i < DUST_COUNT; i++) {
+    pos[i * 3]     = (Math.random() * 2 - 1) * ARENA;
+    pos[i * 3 + 1] = Math.random() * DUST_Y + 0.5;
+    pos[i * 3 + 2] = (Math.random() * 2 - 1) * ARENA;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const p = new THREE.Points(geo, new THREE.PointsMaterial({
+    color: 0x8fdfff, size: 0.4, transparent: true, opacity: 0.12,
+    depthWrite: false, blending: THREE.AdditiveBlending, fog: true }));
+  p.frustumCulled = false;   // rotating + bobbing near origin would clip its own bounds
+  scene.add(p);
+  return p;
+})();
+
+// Per-frame arena ambiance. Driven from animate() (NOT update()) so trims keep
+// breathing on the menu / pause / upgrade screen. Zero allocation: every color
+// write is setRGB against the precomputed channel constants above.
+let glitchTimer = 5, glitchCap = -1, glitchFrames = 0, capsPulsing = false, envTime = 0;
+function resetEnv() {
+  glitchTimer = 5; glitchCap = -1; glitchFrames = 0; capsPulsing = false; envTime = 0;
+  trimMat.color.setRGB(TRIM_R, TRIM_G, TRIM_B);
+  for (const m of pillarCaps) m.color.setRGB(CAP_R, CAP_G, CAP_B);
+  dust.rotation.set(0, 0, 0); dust.position.set(0, 0, 0);
+}
+function updateEnv(dt) {
+  envTime += dt;
+  const et = envTime;
+  // --- dust: slow yaw + a gentle vertical bob (whole cloud, 1 draw call) ------
+  dust.rotation.y += dt * 0.03;
+  dust.position.y = Math.sin(et * 0.18) * 0.6;
+
+  const between = state.betweenWaves > 0 || state.choosing;
+  const bossFight = state.wave > 0 && state.wave % 5 === 0 &&
+                    enemies.length > 0 && !between;   // only during the live fight
+
+  // --- wall trims: pulse brightness (between-wave state readable from this alone)
+  if (between) {                                       // fast white-cyan throb
+    const b = 0.55 + 0.45 * Math.sin(et * 4.5);
+    trimMat.color.setRGB(0.5 * b, (TRIM_G + (1 - TRIM_G) * 0.5) * b, TRIM_B * b);
+  } else if (bossFight) {                              // hold dim/steady; caps do the work
+    trimMat.color.setRGB(0, TRIM_G * 0.4, TRIM_B * 0.42);
+  } else {                                             // idle: slow calm cyan breath
+    const b = 0.62 + 0.38 * Math.sin(et * 0.9);
+    trimMat.color.setRGB(0, TRIM_G * b, TRIM_B * b);
+  }
+
+  // --- pillar caps: menacing pink throb on boss fights, else occasional glitch --
+  if (bossFight) {
+    const b = 0.5 + 0.5 * Math.sin(et * 2.4);
+    for (const m of pillarCaps) m.color.setRGB(CAP_R * b, CAP_G * b, CAP_B * b);
+    capsPulsing = true;
+  } else {
+    if (capsPulsing) {                                 // boss ended — settle caps back
+      for (const m of pillarCaps) m.color.setRGB(CAP_R, CAP_G, CAP_B);
+      capsPulsing = false;
+    }
+    if (glitchFrames > 0) {                            // mid-flicker: stutter bright/dark
+      glitchFrames--;
+      if (glitchFrames === 0) pillarCaps[glitchCap].color.setRGB(CAP_R, CAP_G, CAP_B);
+      else { const on = glitchFrames % 2 === 0;
+             pillarCaps[glitchCap].color.setRGB(on ? 1 : 0.06, on ? 1 : 0.02, on ? 1 : 0.09); }
+    } else {
+      glitchTimer -= dt;
+      if (glitchTimer <= 0) {                          // fire a new 3-frame data-glitch
+        glitchCap = Math.floor(Math.random() * pillarCaps.length);
+        glitchFrames = 3;
+        pillarCaps[glitchCap].color.setRGB(1, 1, 1);
+        glitchTimer = 4 + Math.random() * 5;
+      }
+    }
+  }
+}
 
 // ===========================================================================
 // Sky & horizon — static scenery outside the arena. Built once at load, all
@@ -2697,6 +2790,7 @@ function animate() {
   const slow = state.slowmo > 0;                                   // speed-line overlay (item 27)
   if (slow !== slowmoOn) { slowmoOn = slow; document.body.classList.toggle('slowmo', slow); }
   if (state.running && !state.paused && !state.choosing) update(dt);
+  updateEnv(raw);   // item 31: arena idles alive regardless of pause/choosing state
   if (settings.bloom) composer.render(); else renderer.render(scene, camera);
   if (settings.showFps) {
     fpsFrames++; fpsTime += raw;
@@ -2962,6 +3056,7 @@ function resetGame() {
   state.toSpawn = 0; state.betweenWaves = 0; state.pickupTimer = 8; state.shake = 0;
   state.time = 0; state.slowmo = 0; state.choosing = false; state.rerolled = false; state.mutator = null;
   setMood(1, true);   // item 28: snap arena mood back to the wave-1 baseline on restart
+  resetEnv();         // item 31: settle trims/caps/dust glitch state to idle
   gridUniforms.uTime.value = 0; gridUniforms.uRipples.value.forEach(r => r.set(0, 0, -1e3, 0)); rippleIdx = 0;
   state.lastHitBy = null; state.upgrades = [];
   state.stats = { shots: 0, hits: 0, crits: 0, kills: 0, bestCombo: 1, style: 0, dmgDealt: 0, dmgTaken: 0, wkills: {} };
