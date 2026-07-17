@@ -1183,20 +1183,54 @@ scene.add(camera);
 // ===========================================================================
 // Tracers / particles / projectiles
 // ===========================================================================
-// Tracers — pooled Lines with a preallocated 2-point buffer (reused, never re-created).
+// Tracers — pooled camera-facing glowing quads (fat tracers). A shared unit
+// PlaneGeometry lies in XY with local +Y as its long axis; per spawn we scale Y
+// to the shot length, X to the beam width, and orient a basis so local Y runs
+// from→to while the quad face billboards toward the camera. Per-instance material
+// carries the weapon colour and the fade opacity; the soft-edged gradient texture
+// (bright core → transparent edges across the width) is shared and built once.
 const tracers = [], tracerPool = [];
+const TRACER_GEO = new THREE.PlaneGeometry(1, 1);
+const TRACER_TEX = (() => {
+  const c = document.createElement('canvas'); c.width = 32; c.height = 4;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 32, 0);
+  grad.addColorStop(0, 'rgba(255,255,255,0)');
+  grad.addColorStop(0.5, 'rgba(255,255,255,1)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, 32, 4);
+  const t = new THREE.CanvasTexture(c); t.minFilter = THREE.LinearFilter; return t;
+})();
+const TRACER_WIDTH = 0.16;
+// Preallocated scratch so spawnTracer allocates nothing after pool warm-up.
+const _trMid = new THREE.Vector3(), _trDir = new THREE.Vector3(), _trCam = new THREE.Vector3(),
+      _trRight = new THREE.Vector3(), _trNormal = new THREE.Vector3(), _trMat = new THREE.Matrix4();
+const _TR_UP = new THREE.Vector3(0, 1, 0);
 function spawnTracer(from, to, color = 0x9ff6ff) {
-  let line = tracerPool.pop();
-  if (!line) {
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
-    line = new THREE.Line(geo, new THREE.LineBasicMaterial({ transparent: true }));
-    line.frustumCulled = false;
+  let mesh = tracerPool.pop();
+  if (!mesh) {
+    mesh = new THREE.Mesh(TRACER_GEO, new THREE.MeshBasicMaterial({
+      map: TRACER_TEX, transparent: true, blending: THREE.AdditiveBlending,
+      depthWrite: false, side: THREE.DoubleSide,
+    }));
+    mesh.frustumCulled = false;
   }
-  const pos = line.geometry.attributes.position;
-  pos.setXYZ(0, from.x, from.y, from.z); pos.setXYZ(1, to.x, to.y, to.z); pos.needsUpdate = true;
-  line.material.color.setHex(color); line.material.opacity = 0.9; line.visible = true;
-  scene.add(line); tracers.push({ line, life: 0.06 });
+  _trMid.addVectors(from, to).multiplyScalar(0.5);
+  _trDir.subVectors(to, from);
+  const dist = _trDir.length() || 1e-4;
+  _trDir.multiplyScalar(1 / dist);
+  _trCam.subVectors(camera.position, _trMid);        // mid → camera
+  _trRight.crossVectors(_trDir, _trCam);
+  if (_trRight.lengthSq() < 1e-8) _trRight.crossVectors(_trDir, _TR_UP);  // beam ∥ view
+  if (_trRight.lengthSq() < 1e-8) _trRight.set(1, 0, 0);                  // beam ∥ world up
+  _trRight.normalize();
+  _trNormal.crossVectors(_trRight, _trDir).normalize();  // faces the camera
+  _trMat.makeBasis(_trRight, _trDir, _trNormal);
+  mesh.quaternion.setFromRotationMatrix(_trMat);
+  mesh.position.copy(_trMid);
+  mesh.scale.set(TRACER_WIDTH, dist, 1);
+  mesh.material.color.setHex(color); mesh.material.opacity = 0.9; mesh.visible = true;
+  scene.add(mesh); tracers.push({ mesh, life: 0.06 });
 }
 // Particles — pooled cubes sharing one geometry; only the material colour varies per burst.
 const particles = [], particlePool = [];
@@ -2667,8 +2701,8 @@ function update(dt) {
 
   // ----- tracers / particles -----
   for (let i = tracers.length - 1; i >= 0; i--) {
-    const tr = tracers[i]; tr.life -= dt; tr.line.material.opacity = Math.max(0, tr.life / 0.06) * 0.9;
-    if (tr.life <= 0) { scene.remove(tr.line); tr.line.visible = false; tracerPool.push(tr.line); tracers.splice(i, 1); }
+    const tr = tracers[i]; tr.life -= dt; tr.mesh.material.opacity = Math.max(0, tr.life / 0.06) * 0.9;
+    if (tr.life <= 0) { scene.remove(tr.mesh); tr.mesh.visible = false; tracerPool.push(tr.mesh); tracers.splice(i, 1); }
   }
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i]; p.life -= dt; p.vy -= 30 * dt;
@@ -3017,7 +3051,7 @@ document.getElementById('resumeBtn').addEventListener('click', resumeGame);
 function resetGame() {
   enemies.forEach(disposeEnemy); enemies.length = 0;
   particles.forEach(p => { scene.remove(p.mesh); p.mesh.visible = false; particlePool.push(p.mesh); }); particles.length = 0;
-  tracers.forEach(tr => { scene.remove(tr.line); tr.line.visible = false; tracerPool.push(tr.line); }); tracers.length = 0;
+  tracers.forEach(tr => { scene.remove(tr.mesh); tr.mesh.visible = false; tracerPool.push(tr.mesh); }); tracers.length = 0;
   dmgNumbers.forEach(n => { scene.remove(n.sprite); n.sprite.visible = false; dmgNumberPool.push(n.sprite); }); dmgNumbers.length = 0;
   shockRings.forEach(freeShockRing); shockRings.length = 0;
   flashes.forEach(freeFlash); flashes.length = 0;
