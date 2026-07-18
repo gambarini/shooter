@@ -42,6 +42,43 @@ export function validateRun(body) {
   return { n: sanitizeName(body.name), s, w };
 }
 
+// ---- score-for-wave plausibility (roadmap item 39, anti-abuse) ----------------
+// BEST-EFFORT ceiling: the max score a run could *theoretically* reach by wave W,
+// used to reject obvious forgeries (e.g. MAX_SCORE claimed at wave 1). It is
+// deliberately GENEROUS — a false reject of a real high run is worse than letting
+// a forgery through (a determined forger can pick a plausible-looking pair
+// anyway; this only raises the bar against casual abuse).
+//
+// Derivation from the game (index.html): each kill scores
+//   base * combo * mutator.scoreMul   (+ flat style bonuses)
+// with combo capped at 99 (killEnemy) and the only score multiplier being a
+// mutator's scoreMul, max 2 (BERSERK). Style bonuses are flat and cap at
+// 150+200+100 = 450 per kill. Highest per-kill base is a VOLATILE elite splitter
+// (150 * 3 = 450). So a regular kill maxes at 450*99*2 + 450 = 89,550; a boss
+// (base 1000) at 1000*99*2 + 450 = 198,450. We round both up for headroom.
+//
+// Spawn counts: startWave sets toSpawn = 4 + floor(1.7*W), mutator waves multiply
+// by up to 2 (SWARM), plus one boss per 5 waves. Splitter children are NOT counted
+// in toSpawn, so real kills can exceed it — the flat 2x count headroom absorbs that.
+const PERKILL_MAX = 90_000;   // ceiling per regular kill (> theoretical 89,550)
+const BOSS_MAX = 210_000;     // ceiling per boss kill  (> theoretical 198,450)
+const FLAT_SLACK = 20_000;    // small-wave slack so wave 1 isn't razor-thin
+
+export function maxPlausibleScore(wave) {
+  const w = Math.max(1, Math.min(Math.floor(wave) || 1, MAX_WAVE));
+  let enemies = 0;
+  for (let n = 1; n <= w; n++) enemies += 2 * (4 + Math.floor(1.7 * n)); // 2x = mutator count headroom
+  const bosses = Math.floor(w / 5);
+  return enemies * PERKILL_MAX + bosses * BOSS_MAX + FLAT_SLACK;
+}
+
+// True iff `score` is within the plausible ceiling for `wave`. The handler turns
+// false into a rejection (well-formed but implausible — distinct from a malformed
+// payload, which validateRun rejects).
+export function plausibleRun(score, wave) {
+  return Number.isFinite(score) && score <= maxPlausibleScore(wave);
+}
+
 // Insert `run` into a score-descending array, preserving order. Existing runs of
 // an equal score keep priority (new run goes after them), so ties rank by who
 // got there first. Returns a new array; does not mutate `runs`.

@@ -2927,6 +2927,22 @@ handleInput.addEventListener('input', () => {
   try { localStorage.setItem(NAME_KEY, playerName); } catch {}
 });
 
+// Submit token (item 39, best-effort anti-abuse). Fetched from GET /api/scores at
+// run start; echoed on the end-of-run POST so a naive POST that never asked for a
+// token is rejected server-side. Deterrent only — it's plainly observable here.
+// Never blocks gameplay: any failure (e.g. the static dev server has no functions
+// runtime and 404s) just leaves the token null and the POST fails as it did before.
+let runToken = null;
+async function fetchRunToken() {
+  runToken = null;
+  try {
+    const r = await fetch('/api/scores');
+    if (!r.ok) return;
+    const data = await r.json();
+    if (data && typeof data.token === 'string') runToken = data.token;
+  } catch {}
+}
+
 // Fire-and-forget POST of a finished run. Must NEVER break the death screen:
 // every failure mode is caught and shown as a subtle note. Crucially, a non-OK
 // response counts as failure too — the static `python3 -m http.server` (no
@@ -2946,7 +2962,7 @@ async function submitScore(name, score, wave) {
     const r = await fetch('/api/scores', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: name || 'ANON', score, wave }),
+      body: JSON.stringify({ name: name || 'ANON', score, wave, token: runToken }),
     });
     if (!r.ok) throw new Error('http ' + r.status);
     const data = await r.json();
@@ -3106,6 +3122,7 @@ function startGame() {
   initAudio();
   if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
   resetGame();
+  fetchRunToken();   // item 39: grab a fresh submit token for this run (fire-and-forget)
   overlay.classList.add('hidden');
   state.running = true; state.paused = false;
   lockPointer();
