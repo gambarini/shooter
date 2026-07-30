@@ -1,0 +1,44 @@
+# Cloudflare Pages response headers (roadmap item 53) — the verbatim replacement
+# for the three [[headers]] blocks netlify.toml used to carry. Same policy, same
+# CSP, nothing relaxed or tightened: item 52 kept /api/scores same-origin, so
+# `connect-src 'self'` still covers the leaderboard fetch.
+#
+# This file only takes effect if it sits INSIDE the uploaded directory, so the
+# deploy workflow does `cp _headers dist/` alongside the version-stamped
+# index.html. Keeping the source copy at the repo root (not in dist/, which is
+# gitignored) is what keeps it version-controlled.
+#
+# Free plan allows 100 header rules; this uses about 7.
+
+# Baseline security headers for every response.
+#
+# The Content-Security-Policy is the delicate one — it must NOT break the game,
+# which loads entirely inline plus three.js from the unpkg CDN:
+#   - script-src 'unsafe-inline'      -> the inline importmap, watchdog, and module
+#                                        scripts (an importmap is an inline script to
+#                                        CSP; do NOT add a nonce/hash — that makes
+#                                        browsers ignore 'unsafe-inline' and the
+#                                        importmap + module die)
+#   - script-src https://unpkg.com    -> ES-module `import` fetches are governed by
+#                                        script-src
+#   - connect-src https://unpkg.com   -> belt-and-suspenders for the module fetch
+#   - style-src 'unsafe-inline'       -> the inline <style> block
+#   - img-src data:                   -> the inline favicon data-URI
+# WebGL shader compile and Web Audio synthesis need no CSP allowances (no eval, no
+# blob workers).
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: no-referrer
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://unpkg.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'
+
+# Caching: index.html must revalidate on every request so a fresh deploy shows up
+# immediately (no stale HTML from the edge). There are no fingerprinted local
+# assets to cache long-lived — three.js comes from unpkg with its own caching.
+# Pages serves "/" from index.html, so both paths get the rule; it merges with the
+# /* block above.
+/
+  Cache-Control: public, max-age=0, must-revalidate
+
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate

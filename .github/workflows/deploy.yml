@@ -1,0 +1,79 @@
+# NEON STRIKE — deploy to Cloudflare Pages (roadmap item 53).
+#
+# This replaces the whole [build] section of netlify.toml. The project is a
+# Cloudflare Pages DIRECT UPLOAD project, deliberately NOT connected to this repo
+# in the Cloudflare dashboard: that choice is a one-way door (a git-integrated
+# project can never be converted to direct upload, or back), and it is what keeps
+# the build command, the tag fetch and the docs-only deploy skip in version
+# control instead of in dashboard fields.
+#
+# Requires two repository secrets, which are the only part of this setup that is
+# NOT recoverable from git:
+#   CLOUDFLARE_API_TOKEN   — token with the "Edit Cloudflare Workers" permission
+#   CLOUDFLARE_ACCOUNT_ID  — the account the neon-strike Pages project lives in
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    # Skip the deploy when a push only touched dev-only files — nothing the live
+    # site serves. This is the version-controlled replacement for netlify.toml's
+    # `ignore` command, and it stays a DENYLIST on purpose: any new or unlisted
+    # file (index.html, _headers, functions/**, lib/**) still deploys, which is
+    # the safe default.
+    paths-ignore:
+      - 'CLAUDE.md'
+      - 'PLAN.md'
+      - 'README.md'
+      - 'Makefile'
+      - '.gitignore'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The version badge (roadmap item 35) is stamped from `git describe
+          # --tags` below, so the tags have to actually be here. Netlify's shallow
+          # clone needed an explicit `git fetch --tags` for exactly this reason —
+          # without it the badge silently degrades to a bare commit hash forever.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Unit-test pure leaderboard logic
+        # Explicit file, NOT `node --test lib/`: pointed at a directory, the test
+        # runner exits 0 with "no tests found" if the file is missing or misnamed,
+        # so this deploy gate would silently pass forever. Naming the file makes
+        # that a hard error. Same command as `make test`.
+        run: node --test lib/leaderboard-core.test.mjs
+
+      - name: Stamp version + stage dist
+        # dist/ holds exactly what the live site serves. Staging it (rather than
+        # publishing the repo root) is what keeps CLAUDE.md, PLAN.md, README.md
+        # and the Makefile off the live URL.
+        #
+        # Keep the sed pattern scoped to ">__VERSION__<" (the badge divs), NOT a
+        # bare "__VERSION__" — a bare match also rewrites the JS placeholder
+        # guard's own string literal (`el.textContent === '__VERSION__'`), which
+        # then flips the freshly-stamped badge back to "dev" at page load. Commit
+        # c8c7ce6 fixed exactly that; do not reintroduce it.
+        run: |
+          VER=$(git describe --tags --always --dirty)
+          echo "stamping version: $VER"
+          mkdir -p dist
+          sed "s/>__VERSION__</>$VER</" index.html > dist/index.html
+          cp _headers dist/
+
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Runs from the repo root, so wrangler picks up wrangler.toml (the D1
+          # binding the leaderboard Function reads as env.DB) and compiles the
+          # root functions/ folder into Pages Functions. `dist` is only the static
+          # half of the deploy.
+          command: pages deploy dist --project-name=neon-strike
