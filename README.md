@@ -4,7 +4,7 @@ A single-file 3D arena wave shooter — clear the arena, switch weapons, survive
 Built with [three.js](https://threejs.org/) and a whole lot of neon. No build step, no
 dependencies, no bundler: the entire game is one `index.html`.
 
-**▶ Play:** <https://lustrous-chimera-efa4db.netlify.app/>
+**▶ Play:** <https://neon-strike-7b6.pages.dev/>
 
 ## Controls
 
@@ -45,12 +45,20 @@ pointer lock and module imports.
 
 ## Deploy
 
-Hosted on Netlify as a no-build static site. `netlify.toml` stages just `index.html` into a
-`dist/` publish directory, so the live site ships only the game and none of the repo's dev
-docs. Every push to `main` auto-deploys — tags are not a separate deploy trigger.
+Hosted on **Cloudflare Pages** as a no-build static site, deployed by
+`.github/workflows/deploy.yml` on every push to `main` (Direct Upload via
+`wrangler-action` — the repo is deliberately *not* connected to Cloudflare's dashboard
+git integration, so the whole pipeline stays version-controlled). The workflow stages
+just `index.html` plus `_headers` into a `dist/` directory, so the live site ships only
+the game and none of the repo's dev docs. Pushes that touch only docs are skipped via
+`paths-ignore`, and the deploy is gated on `node --test lib/leaderboard-core.test.mjs`.
+Tags are not a separate deploy trigger.
 
-The build also stamps a version onto the page: `index.html` has a literal `__VERSION__`
-placeholder (small badge on the start/pause cards), and the Netlify build command runs
+The leaderboard endpoint at `/api/scores` ships with the same deploy: `functions/api/`
+is compiled into a Pages Function, bound to a D1 database by `wrangler.toml`.
+
+The workflow also stamps a version onto the page: `index.html` has a literal
+`__VERSION__` placeholder (small badge on the start/pause cards), and the deploy runs
 `git describe --tags` and `sed`s the result in, so the live badge always self-reports
 exactly what's deployed. Serving the raw file locally (no build step) shows `dev` instead.
 

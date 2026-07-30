@@ -1,16 +1,29 @@
 # NEON STRIKE — project guide
 
 Single-file 3D arena wave shooter. All code lives in `index.html` (CSS → HUD markup → one
-`<script type="module">` using three.js from the unpkg CDN). No build step, no dependencies,
-no tests — verification is playtesting in a browser.
+`<script type="module">` using three.js from the unpkg CDN). No build step and no runtime
+dependencies. The GAME has no tests — verification is playtesting in a browser. The only
+tested code is the leaderboard backend's pure core (`lib/leaderboard-core.mjs`), covered by
+`lib/leaderboard-core.test.mjs` under plain `node --test`; the deploy workflow runs it as a
+gate, so it must stay green.
 
 ## Run / verify
 
-- `open index.html` works, but pointer lock is more reliable over http:
-  `python3 -m http.server 8000` → http://localhost:8000
+- `make serve` → http://localhost:8000 (static only: `/api/scores` 404s, board shows
+  OFFLINE). `open index.html` works too, but pointer lock is more reliable over http.
+- `make dev` → http://localhost:8788 — the full stack, including the leaderboard Function
+  against a real local D1. Use this whenever a change touches `functions/` or `lib/`.
+- `make test` → the leaderboard core's unit tests (the same command CI gates deploys on).
 - Minimum verification after any change: start a run, play 3+ waves, die or restart once,
   play 1 more wave. Watch the FPS counter (Settings → SHOW FPS) during shotgun spam.
 - Test both a fresh run AND a restart — most state-leak bugs only show on the second run.
+
+## Deploy
+
+Cloudflare Pages, Direct Upload, driven entirely by `.github/workflows/deploy.yml` on
+pushes to `main` — never from Cloudflare's dashboard (the project is deliberately not
+git-connected, and that choice is a one-way door). `_headers` carries the security/cache
+headers; `wrangler.toml` carries the D1 binding. Live: https://neon-strike-7b6.pages.dev/
 
 ## Roadmap workflow (the progressive loop)
 
