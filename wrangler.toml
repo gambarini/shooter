@@ -3,7 +3,9 @@
 # Two things live here:
 #   1. the D1 binding the leaderboard Function reads (`env.DB`), and
 #   2. `pages_build_output_dir`, which tells wrangler which directory is the
-#      static site — the same `dist/` staging directory netlify.toml builds.
+#      static site — the `dist/` staging directory .github/workflows/deploy.yml
+#      builds (one version-stamped index.html plus _headers, so the repo's
+#      dev-only files never reach the live URL).
 #
 # There is deliberately NO build command here: Cloudflare's Direct Upload flow
 # (item 53) runs the version-stamping sed in a GitHub Actions step instead, so

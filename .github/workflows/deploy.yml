@@ -1,7 +1,8 @@
 # NEON STRIKE — deploy to Cloudflare Pages (roadmap item 53).
 #
-# This replaces the whole [build] section of netlify.toml. The project is a
-# Cloudflare Pages DIRECT UPLOAD project, deliberately NOT connected to this repo
+# This is the whole deploy pipeline (it replaced Netlify's netlify.toml, deleted in
+# the same roadmap item). The project is a Cloudflare Pages DIRECT UPLOAD project,
+# deliberately NOT connected to this repo
 # in the Cloudflare dashboard: that choice is a one-way door (a git-integrated
 # project can never be converted to direct upload, or back), and it is what keeps
 # the build command, the tag fetch and the docs-only deploy skip in version
@@ -17,8 +18,9 @@ on:
   push:
     branches: [main]
     # Skip the deploy when a push only touched dev-only files — nothing the live
-    # site serves. This is the version-controlled replacement for netlify.toml's
-    # `ignore` command, and it stays a DENYLIST on purpose: any new or unlisted
+    # site serves. This is the version-controlled replacement for the old
+    # netlify.toml `ignore` command, and it stays a DENYLIST on purpose: any new
+    # or unlisted
     # file (index.html, _headers, functions/**, lib/**) still deploys, which is
     # the safe default.
     paths-ignore:
