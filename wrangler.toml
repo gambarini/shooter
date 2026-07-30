@@ -1,0 +1,33 @@
+# Cloudflare configuration for NEON STRIKE (roadmap item 52).
+#
+# Two things live here:
+#   1. the D1 binding the leaderboard Function reads (`env.DB`), and
+#   2. `pages_build_output_dir`, which tells wrangler which directory is the
+#      static site — the same `dist/` staging directory netlify.toml builds.
+#
+# There is deliberately NO build command here: Cloudflare's Direct Upload flow
+# (item 53) runs the version-stamping sed in a GitHub Actions step instead, so
+# the build stays version-controlled rather than living in a dashboard field.
+#
+# Local dev (no deploy, no network):
+#   npx wrangler d1 execute neon-strike --local --file=./schema.sql
+#   mkdir -p dist && cp index.html dist/
+#   npx wrangler pages dev            # -> http://localhost:8788
+# The local D1 is a real SQLite file under .wrangler/state (gitignored).
+name = "neon-strike"
+# Must be <= the newest date the installed workerd binary knows, or the local
+# runtime refuses to start ("requires compatibility date 2026-07-30, but the
+# newest date supported by this server binary is 2026-07-29"). Nothing here
+# depends on a recent compat flag, so this only needs bumping alongside a
+# wrangler upgrade.
+compatibility_date = "2026-07-29"
+pages_build_output_dir = "dist"
+
+# The leaderboard database. `binding` is the name the Function sees on `env`,
+# so functions/api/scores.js uses env.DB. The id is the one `wrangler d1 create
+# neon-strike` returned on 2026-07-30 (region OC); `--local` ignores it and uses
+# a local SQLite file keyed by database_name.
+[[d1_databases]]
+binding = "DB"
+database_name = "neon-strike"
+database_id = "c7db594a-f692-4b79-a888-6cca3fe45c17"

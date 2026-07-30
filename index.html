@@ -2945,9 +2945,12 @@ async function fetchRunToken() {
 
 // Fire-and-forget POST of a finished run. Must NEVER break the death screen:
 // every failure mode is caught and shown as a subtle note. Crucially, a non-OK
-// response counts as failure too — the static `python3 -m http.server` (no
-// functions runtime) answers /api/scores with a 404 + HTML body, so we bail on
-// `!r.ok` BEFORE calling r.json() (which would otherwise throw on the HTML).
+// response counts as failure too — the static `make serve` (python3 -m
+// http.server, no functions runtime) answers /api/scores with a 404 + HTML body,
+// so we bail on `!r.ok` BEFORE calling r.json() (which would otherwise throw on
+// the HTML). To exercise the leaderboard locally, run `make dev` instead: that
+// serves the Cloudflare Pages Function against a real local D1 on :8788, so this
+// whole path — token fetch, POST, rank render — works with no deploy (item 52).
 // RELATIVE path only: the CSP is connect-src 'self', so it must be same-origin.
 async function submitScore(name, score, wave) {
   const note = document.getElementById('overSubmit');

@@ -2,3 +2,7 @@ node_modules/
 .DS_Store
 dist/
 .netlify/
+.idea/
+# `wrangler pages dev` keeps the local D1 SQLite database under .wrangler/state —
+# real data, machine-local, never committed. Delete it to reset the local board.
+.wrangler/
