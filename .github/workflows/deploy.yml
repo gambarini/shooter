@@ -72,6 +72,11 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Pin wrangler. Left unset, the action installs its own baked-in default
+          # (3.90.0, from Nov 2024) — not whatever is current, and not the version
+          # this repo's `functions/` + wrangler.toml were verified against locally.
+          # Bump this together with the compatibility_date in wrangler.toml.
+          wranglerVersion: '4.115.0'
           # Runs from the repo root, so wrangler picks up wrangler.toml (the D1
           # binding the leaderboard Function reads as env.DB) and compiles the
           # root functions/ folder into Pages Functions. `dist` is only the static
