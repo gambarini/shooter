@@ -11,11 +11,16 @@ serve:
 # D1 (SQLite under .wrangler/state). No deploy, no network, no Cloudflare account
 # needed beyond the one-time `npx wrangler login`.
 #
-# dist/ is staged by hand here because wrangler needs the directory to exist and
-# item 53 owns the real version-stamping build; offline the version badge is
-# irrelevant, so a plain copy is right.
+# dist/ is staged by hand here, mirroring what .github/workflows/deploy.yml stages
+# for the real deploy. Offline the version badge is irrelevant, so index.html is a
+# plain copy rather than a version-stamped one.
+#
+# _headers MUST be copied in: wrangler only applies it from INSIDE the served
+# directory (same reason the deploy workflow does `cp _headers dist/`). Without it
+# `make dev` serves no CSP, which is exactly the header most likely to break the
+# game — so this copy is what makes the CSP locally testable at all.
 dev: schema
-	@mkdir -p dist && cp index.html dist/
+	@mkdir -p dist && cp index.html _headers dist/
 	@echo "NEON STRIKE + leaderboard → http://localhost:8788  (Ctrl+C to stop)"
 	@npx wrangler pages dev
 
