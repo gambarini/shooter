@@ -67,6 +67,16 @@ Each session does exactly ONE item:
 One item = one commit. Don't batch items; the point is each change is playable and
 revertable on its own.
 
+The six steps above are the whole loop, and running them by hand in one session is always a
+valid way to work. `/roadmap-item` is the same loop packaged as a skill — solo by default,
+so it spawns nothing. Add `fanout` (`/roadmap-item fanout`) to bracket the edit with two
+read-only agent fan-outs: recon before it (hook anchors, precedent, `resetGame` inventory,
+touch surfaces, convention landmines) and review after it (state leaks, point-light budget,
+touch parity, conventions, one agent per "Done when" bullet). The fan-outs only produce a
+brief and a findings list — the edit, the browser playtest, every Notion write and the
+commit/tag stay in the main session in both modes. Worth the extra agents for unfamiliar
+code, new entity types, or four-plus "Done when" bullets; skip them for tuning and copy.
+
 ## Code rules (summary — full version in the Notion HQ page conventions)
 
 - Pool anything spawned per-hit/per-frame (see `particlePool` / `tracerPool` patterns).
