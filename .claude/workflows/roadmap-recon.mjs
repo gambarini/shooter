@@ -4,7 +4,7 @@ export const meta = {
   whenToUse:
     'Run from the main session AFTER fetching the item spec from Notion and claiming it wip, BEFORE editing index.html. Pass the spec via args. Returns a brief; the main session does the actual edit.',
   phases: [
-    { title: 'Recon', detail: 'five read-only agents, one question each' },
+    { title: 'Recon', detail: 'five read-only agents, one question each (2 on sonnet)' },
     { title: 'Brief', detail: 'merge findings into one implementation brief' },
   ],
 }
@@ -64,9 +64,16 @@ const FINDINGS = {
 // Five lenses. Each is a question no other agent is asked, so contexts stay clean
 // and nothing is read twice. Keep this list at 5-6: the session workflow-size
 // guideline is 15 agents total and the Brief phase spends one more.
+//
+// `cheap: true` downgrades a lens to Sonnet at low effort. Only the two pure
+// LOCATE-AND-REPORT lenses get it â€” they grep index.html and transcribe what is
+// there, which is not a judgement task. The three that require judgement
+// (which pattern to copy, what would leak, what would make a correct-looking diff
+// wrong) inherit the session model, as does the Brief that reconciles them.
 const LENSES = [
   {
     key: 'anchors',
+    cheap: true,
     q: `Locate every function named in this item's "Hook points", plus update(dt), startWave and resetGame.
 For each: its exact line, its signature, what it currently does, and the precise place new code for this
 item should slot in (before/after which statement, and why).`,
@@ -88,6 +95,7 @@ state leak on restart. Restart leaks are this project's most common bug class â€
   },
   {
     key: 'io',
+    cheap: true,
     q: `Report the input and presentation surfaces this item would touch: the keydown/keyup handler and how keys are
 registered; the #touch block (markup + the JS that wires those buttons) and what a new control must add there;
 the \`ui\` object and the flashCombo / flashTip helpers; the settings panel and how a toggle is persisted;
@@ -111,6 +119,7 @@ const recon = await parallel(
       label: `recon:${lens.key}`,
       phase: 'Recon',
       schema: FINDINGS,
+      ...(lens.cheap ? { model: 'sonnet', effort: 'low' } : {}),
     }).then((r) => ({ key: lens.key, ...r })),
   ),
 )

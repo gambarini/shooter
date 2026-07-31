@@ -64,6 +64,12 @@ const FINDINGS = {
 
 // Standing lenses — the four failure modes this project actually ships.
 // Sourced from CLAUDE.md and the Notion HQ "Codebase conventions" + "Cross-cutting reminders".
+//
+// Deliberately NO `model` override anywhere in this file: every agent inherits the
+// session model. This workflow is the quality gate for a game with no tests, where
+// the cost of a missed finding is a broken restart shipped to the live site and a
+// wasted playtest. roadmap-recon.mjs downgrades its two retrieval-only lenses to
+// sonnet; that trade does not apply here, where every lens is a judgement call.
 const LENSES = [
   {
     key: 'state-leak',
