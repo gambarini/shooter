@@ -218,18 +218,30 @@
   .srow .val { min-width:44px; text-align:right; color:#fff; font-variant-numeric:tabular-nums; }
   .best { color:#ffd27a; font-size:14px; letter-spacing:2px; margin:6px 0 18px; text-shadow:0 0 10px #ffae3a; }
   .best b { color:#fff; font-size:22px; }
-  /* Player handle entry (item 37) — neon text field on the start card. */
-  .handlerow { display:flex; align-items:center; justify-content:center; gap:12px; margin:0 auto 22px;
-               font-size:13px; letter-spacing:2px; color:#9fe9ff; }
+  /* Player name entry (item 37, moved to the DEATH card by item 55) — first-timers
+     name themselves after the run, returning players use it in EDIT mode. */
+  .handlerow { display:flex; align-items:center; justify-content:center; gap:10px; margin:0 auto 16px;
+               flex-wrap:wrap; font-size:13px; letter-spacing:2px; color:#9fe9ff; }
   .handlerow label { text-shadow:0 0 8px var(--neon); }
+  #nameHint { flex-basis:100%; font-size:10px; letter-spacing:2px; color:#6f93a6; }
+  /* Small neon pill buttons (SUBMIT / SKIP / EDIT) — same language as #startBtn, quieter. */
+  .minibtn { pointer-events:auto; cursor:pointer; font:inherit; font-weight:800; font-size:11px;
+             letter-spacing:2px; padding:8px 14px; border-radius:8px; border:none; color:#05060c;
+             background:linear-gradient(90deg,#00f0ff,#5cf0ff); box-shadow:0 0 14px rgba(0,240,255,.45);
+             transition:transform .1s, box-shadow .2s; }
+  .minibtn:hover { transform:scale(1.05); box-shadow:0 0 22px rgba(0,240,255,.7); }
+  .minibtn.ghost { background:none; color:#9fe9ff; border:1px solid rgba(0,240,255,.35); box-shadow:none; }
+  .minibtn:disabled { opacity:.35; cursor:default; transform:none; box-shadow:none; }
+  #editName { margin-left:10px; font-size:9px; padding:3px 9px; vertical-align:middle; }
   #handleInput { pointer-events:auto; width:170px; padding:9px 12px; font:inherit; font-size:14px;
                  letter-spacing:2px; text-align:center; text-transform:uppercase; color:#fff; caret-color:#00f0ff;
                  background:rgba(0,20,32,.55); border:1px solid rgba(0,240,255,.4); border-radius:8px;
                  box-shadow:inset 0 0 12px rgba(0,240,255,.2); outline:none; }
   #handleInput:focus { border-color:#00f0ff; box-shadow:inset 0 0 12px rgba(0,240,255,.2), 0 0 16px rgba(0,240,255,.5); }
   #handleInput::placeholder { color:#5a7f92; letter-spacing:2px; }
-  /* Death-card submit status (item 37) — fixed-height slot so the card never reflows. */
-  .submitnote { min-height:15px; font-size:12px; letter-spacing:2px; margin:0 0 16px; }
+  /* Death-card submit status (item 37) — fixed-height slot so the card never reflows.
+     Tall enough to hold the inline EDIT button (item 55) without shifting the board. */
+  .submitnote { min-height:26px; line-height:26px; font-size:12px; letter-spacing:2px; margin:0 0 12px; }
   .submitnote.pending { color:#6f93a6; }
   .submitnote.ok { color:#7be0a0; text-shadow:0 0 8px rgba(90,255,160,.4); }
   .submitnote.off { color:#ff8fb4; text-shadow:0 0 8px rgba(255,46,136,.4); }
@@ -340,11 +352,6 @@
       <label class="srow">BLOOM <input id="setBloom" type="checkbox" checked><span class="val"></span></label>
       <label class="srow">SHOW FPS <input id="setFps" type="checkbox"><span class="val"></span></label>
     </div>
-    <div class="handlerow">
-      <label for="handleInput">HANDLE</label>
-      <input id="handleInput" type="text" maxlength="12" placeholder="ANON"
-             autocomplete="off" spellcheck="false" autocapitalize="characters">
-    </div>
     <button id="startBtn">► ENTER ARENA</button>
   </div>
   <div class="card hidden" id="overCard">
@@ -355,7 +362,16 @@
     <div id="overUps"></div>
     <div class="best" id="overBest">BEST <b>0</b></div>
     <div class="sub" id="overSub">You reached wave 1.</div>
-    <div class="submitnote" id="overSubmit"></div>
+    <div class="submitnote" id="overSubmit"><span id="overSubmitMsg"></span><button
+      type="button" class="minibtn ghost" id="editName" style="display:none">EDIT</button></div>
+    <div class="handlerow" id="nameRow" style="display:none">
+      <label for="handleInput">NAME</label>
+      <input id="handleInput" type="text" maxlength="12" placeholder="ANON"
+             autocomplete="off" spellcheck="false" autocapitalize="characters">
+      <button type="button" class="minibtn" id="submitName">SUBMIT</button>
+      <button type="button" class="minibtn ghost" id="skipName">SKIP</button>
+      <div id="nameHint" style="display:none"></div>
+    </div>
     <div id="overGlobal" style="display:none">
       <div id="overRank"></div>
       <table id="overBoard"><tbody></tbody></table>
@@ -2911,20 +2927,48 @@ function renderBest() {
 }
 renderBest();
 
-// ----- player handle + global leaderboard submit (item 37) -----
-// Handle persists under its own key, mirroring the BEST_KEY pattern. The start
-// card owns the input; gameOver() fires the run at /api/scores.
+// ----- player name + global leaderboard submit (item 37; reworked by item 55) -----
+// The name persists under its own key, mirroring the BEST_KEY pattern. Item 55
+// moved the field OFF the start card: nobody is asked to name themselves before
+// they have a score. Two flows, both driven from presentDeathSubmit():
+//   • stored name  -> gameOver() submits immediately, as it always did, and the
+//                     note offers EDIT (which can only change the NEXT run's name;
+//                     the submit token is single-use and already spent).
+//   • no name yet  -> nothing is POSTed until the player hits SUBMIT (or SKIP).
 const NAME_KEY = 'neonstrike.name';
-let playerName = '';
+let playerName = '';   // the PERSISTED name; '' means "first-timer"
 try { playerName = localStorage.getItem(NAME_KEY) || ''; } catch {}
 const handleInput = document.getElementById('handleInput');
-handleInput.value = playerName;
+const nameRow = document.getElementById('nameRow');
+const nameHint = document.getElementById('nameHint');
+const submitNameBtn = document.getElementById('submitName');
+const skipNameBtn = document.getElementById('skipName');
+const editNameBtn = document.getElementById('editName');
+const submitNote = document.getElementById('overSubmit');
+const submitMsg = document.getElementById('overSubmitMsg');
+
+// EDIT mode: a returning player retyping their name for the NEXT run. Typing then
+// persists live (there is nothing left to submit); in the first-time flow it must
+// NOT — one typed letter followed by SKIP would silently promote a first-timer to
+// "returning" and auto-submit their next run under a name they never confirmed.
+let nameRowEditing = false;
+// The run being offered to the board, captured BY VALUE at gameOver: a restart can
+// land (and wipe `state` / `runToken`) while the player is still typing.
+let deathRun = { score: 0, wave: 0, token: null };
+// Single-use token guard. Set the moment a POST is in flight, consumed or waived,
+// so button + Enter + RUN IT BACK can never fire a second submit (which 403s).
+let submitConsumed = true;
+// Set once a POST has rendered the board with the you-row highlight, so a slow
+// pre-submit rank GET resolving late cannot overwrite it with an unhighlighted one.
+let boardFinal = false;
+
+function saveName() { try { localStorage.setItem(NAME_KEY, playerName); } catch {} }
+
 handleInput.addEventListener('input', () => {
   // Uppercase so the stored/submitted value matches the CSS uppercase display —
   // the leaderboard renders the stored string, so they must agree.
   handleInput.value = handleInput.value.toUpperCase();
-  playerName = handleInput.value;
-  try { localStorage.setItem(NAME_KEY, playerName); } catch {}
+  if (nameRowEditing) { playerName = handleInput.value; saveName(); }
 });
 
 // Submit token (item 39, best-effort anti-abuse). Fetched from GET /api/scores at
@@ -2952,34 +2996,121 @@ async function fetchRunToken() {
 // serves the Cloudflare Pages Function against a real local D1 on :8788, so this
 // whole path — token fetch, POST, rank render — works with no deploy (item 52).
 // RELATIVE path only: the CSP is connect-src 'self', so it must be same-origin.
-async function submitScore(name, score, wave) {
-  const note = document.getElementById('overSubmit');
-  const global = document.getElementById('overGlobal');
-  // Hide the previous run's board SYNCHRONOUSLY (before the await) — gameOver()
-  // renders the card immediately, so a second death would otherwise flash the
-  // last run's table until this resolves.
-  global.style.display = 'none';
-  note.className = 'submitnote pending';
-  note.textContent = 'SUBMITTING SCORE…';
+async function submitScore(name, score, wave, token) {
+  if (submitConsumed) return;   // token is single-use: click + Enter must not race
+  submitConsumed = true;
+  submitNameBtn.disabled = true;
+  nameRow.style.display = 'none';
+  submitNote.className = 'submitnote pending';
+  submitMsg.textContent = 'SUBMITTING SCORE…';
   try {
     const r = await fetch('/api/scores', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: name || 'ANON', score, wave, token: runToken }),
+      body: JSON.stringify({ name: name || 'ANON', score, wave, token }),
     });
     if (!r.ok) throw new Error('http ' + r.status);
     const data = await r.json();
-    note.className = 'submitnote ok';
-    note.textContent = 'SCORE SUBMITTED';
+    submitNote.className = 'submitnote ok';
+    submitMsg.textContent = `SCORE SUBMITTED AS ${name || 'ANON'}`;
+    editNameBtn.style.display = '';
     // The POST already carries {rank,total,top} — render the board with no 2nd
     // request. renderGlobalBoard reveals #overGlobal; leave it hidden on failure.
+    boardFinal = true;
     renderGlobalBoard(data, name || 'ANON', score, wave);
   } catch {
-    note.className = 'submitnote off';
-    note.textContent = 'OFFLINE — SCORE NOT SUBMITTED';
-    // Global section stays hidden; the local recap (best/stats) is untouched.
+    submitNote.className = 'submitnote off';
+    submitMsg.textContent = 'OFFLINE — SCORE NOT SUBMITTED';
+    // Global section stays as the rank GET left it; the local recap is untouched.
   }
 }
+
+// Item 55: the board and "you ranked #N" must never wait on a name. GET
+// /api/scores?score=N returns {top,total,rank} for an arbitrary score, so a
+// first-timer sees where they landed before typing a character.
+//
+// This GET also MINTS A TOKEN we deliberately throw away — assigning it to
+// `runToken` would replace the run's own token with one issued just now, and the
+// POST would then trip MIN_RUN_MS ("run too short") for anyone who types fast.
+// The orphan row is bounded and self-reaping (expired tokens are deleted on GET).
+async function fetchDeathRank(score, wave) {
+  try {
+    const r = await fetch('/api/scores?score=' + score);
+    if (!r.ok) return;            // `make serve` 404s with an HTML body — never .json() it
+    const data = await r.json();
+    if (boardFinal) return;       // a POST already drew the you-row; don't undo it
+    // total+1 counts this run as if it were already in: the headline then reads
+    // identically before and after SUBMIT instead of ticking up by one, and an
+    // empty board still correctly hits renderGlobalBoard's "BE THE FIRST" branch.
+    renderGlobalBoard({ ...data, total: data.total + 1 }, null, score, wave);
+  } catch {}
+}
+
+// Death-screen submit UI. Called from gameOver() with the run passed BY VALUE, and
+// responsible for resetting every scrap of the previous death's state — this is
+// what keeps a second run in the same session behaving like the first.
+function presentDeathSubmit(score, wave, token) {
+  deathRun = { score, wave, token };
+  submitConsumed = false;
+  boardFinal = false;
+  nameRowEditing = false;
+  submitNameBtn.disabled = false;
+  editNameBtn.style.display = 'none';
+  submitNameBtn.style.display = ''; skipNameBtn.style.display = '';
+  nameHint.style.display = 'none';
+  // Hide the previous run's board SYNCHRONOUSLY — gameOver() renders the card
+  // immediately, so a second death would otherwise flash the last run's table.
+  document.getElementById('overGlobal').style.display = 'none';
+
+  if (playerName) {
+    // Returning player: submit straight away, exactly as before item 55. Its POST
+    // response draws the board, so no separate rank GET (and no second token row).
+    nameRow.style.display = 'none';
+    submitScore(playerName, score, wave, token);
+  } else {
+    // First-timer: nothing is POSTed until they act.
+    nameRow.style.display = '';
+    handleInput.value = '';
+    submitNote.className = 'submitnote pending';
+    submitMsg.textContent = 'NAME YOURSELF TO JOIN THE BOARD';
+    // No autofocus on touch — it throws the on-screen keyboard over the recap.
+    if (!isTouch) handleInput.focus();
+    fetchDeathRank(score, wave);
+  }
+}
+
+// SUBMIT — also the RUN IT BACK path, so a typed-but-unsent name is never lost.
+// No-ops when there is nothing to send (already submitted, skipped, empty field).
+function submitTypedName() {
+  if (submitConsumed || nameRowEditing) return;
+  const name = handleInput.value.trim();
+  if (!name) return;                       // empty field = SKIP semantics
+  playerName = name; saveName();           // first-time flow persists on SUBMIT only
+  submitScore(name, deathRun.score, deathRun.wave, deathRun.token);
+}
+submitNameBtn.addEventListener('click', submitTypedName);
+handleInput.addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();                      // shares submitConsumed with the button
+  if (nameRowEditing) handleInput.blur(); else submitTypedName();
+});
+skipNameBtn.addEventListener('click', () => {
+  submitConsumed = true;                   // RUN IT BACK must not resurrect the run
+  nameRow.style.display = 'none';
+  submitNote.className = 'submitnote pending';
+  submitMsg.textContent = 'RUN NOT SUBMITTED';
+});
+// EDIT is name-only: the token for THIS run is spent, so there is nothing to
+// re-POST. Say so rather than implying the board is about to change.
+editNameBtn.addEventListener('click', () => {
+  nameRowEditing = true;
+  nameRow.style.display = '';
+  handleInput.value = playerName;
+  submitNameBtn.style.display = 'none'; skipNameBtn.style.display = 'none';
+  nameHint.style.display = ''; nameHint.textContent = 'APPLIES TO YOUR NEXT RUN';
+  editNameBtn.style.display = 'none';
+  if (!isTouch) handleInput.focus();
+});
 
 // Render the "You ranked #N of M" line + neon top-10 table from a POST response.
 // Bails (section stays hidden) if the payload is missing the fields it needs, so
@@ -3162,13 +3293,18 @@ function gameOver() {
     (isNewBest ? '★ NEW BEST — ' : '') + `You reached wave ${state.wave}.`;
   startCard.classList.add('hidden'); pauseCard.classList.add('hidden');
   overCard.classList.remove('hidden'); overlay.classList.remove('hidden');
-  // Fire-and-forget: pass the final stats by value so the async resolution
-  // can't read post-reset state. Never awaited — the card is already rendered.
-  submitScore(playerName, state.score, state.wave);
+  // Fire-and-forget: pass the final stats AND this run's token by value so the
+  // async resolution can't read post-reset state. Never awaited — the card is
+  // already rendered, and a first-timer may sit here typing for a while.
+  presentDeathSubmit(state.score, state.wave, runToken);
 }
 
 document.getElementById('startBtn').addEventListener('click', startGame);
 document.getElementById('againBtn').addEventListener('click', () => {
+  // A first-timer who typed a name but never hit SUBMIT would otherwise lose the
+  // run: submit it first (no-op in every other case), then restart. Safe because
+  // the POST body is built synchronously from values captured at gameOver.
+  submitTypedName();
   overCard.classList.add('hidden'); startCard.classList.remove('hidden'); startGame();
 });
 ui.slots.forEach(s => s.addEventListener('click', () => selectWeapon(+s.dataset.w)));
