@@ -144,8 +144,9 @@
              backdrop-filter: blur(3px); text-align:center; }
   #overlay.hidden { display:none; }
   .card { max-width: 600px; padding: 10px 30px; position:relative; }
-  /* Death screen can grow tall (stats + upgrades + global top-10); keep it on-screen on mobile. */
-  #overCard { max-height:94vh; overflow-y:auto; }
+  /* Death screen can grow tall (stats + upgrades + global top-10); keep it on-screen on mobile.
+     The start card grew the same way once the attract loop's board panel landed (item 54). */
+  #overCard, #startCard { max-height:94vh; overflow-y:auto; }
   .card.hidden { display:none; }
   .verbadge { position:absolute; bottom:6px; right:14px; font-size:11px; letter-spacing:1px;
               color:#6fa8c9; text-shadow:0 0 6px rgba(0,240,255,.6), 0 0 10px rgba(255,46,136,.3);
@@ -154,7 +155,38 @@
        background: linear-gradient(90deg,#00f0ff,#ff2e88); -webkit-background-clip:text; background-clip:text;
        color: transparent; filter: drop-shadow(0 0 18px rgba(0,240,255,.5)); }
   .sub { color:#8fb6c9; margin: 14px 0 26px; font-size: 15px; letter-spacing:1px; }
-  .keys { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-bottom: 28px; }
+  .keys { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+  /* Attract loop (item 54) — rotating info panels on the title screen.
+     #attract is a FIXED-HEIGHT stage: panels are absolutely positioned inside it
+     and crossfade, so nothing below (settings, ENTER ARENA) can ever shift. */
+  /* Panels are absolutely positioned, so they contribute NO height — this is a hard
+     stage size, not a floor. It must fit the tallest panel, which is a full TOP_N=10
+     board (title + header + 10 rows + the total line ≈ 274px); undersize it and the
+     board silently overlaps the dots below. Sized against a 15-run local board. */
+  #attract { position:relative; min-height:276px; max-width:460px; margin:14px auto 0; }
+  .apanel { position:absolute; inset:0; display:flex; flex-direction:column;
+            align-items:center; justify-content:center;
+            opacity:0; transform:translateY(10px); pointer-events:none;
+            transition:opacity .45s ease, transform .45s ease; }
+  .apanel.show { opacity:1; transform:none; pointer-events:auto; }
+  .atitle { font-size:11px; letter-spacing:4px; color:#9fe9ff; margin-bottom:14px;
+            text-shadow:0 0 10px var(--neon); }
+  /* Tighter rows than the death screen's copy: a full TOP_N=10 board has to fit the
+     fixed stage above WITHOUT pushing the card past 94vh. Death board is untouched. */
+  #panelBoard .gboard { max-width:420px; }
+  #panelBoard .gboard td { padding:3px 8px; }
+  #menuBoardMsg { font-size:11px; letter-spacing:2px; color:#6f93a6; }
+  .intel { list-style:none; display:flex; flex-direction:column; gap:10px; text-align:left;
+           font-size:12px; letter-spacing:1px; line-height:1.45; color:#8fb6c9; max-width:420px; }
+  .intel b { color:#bfe9ff; text-shadow:0 0 8px rgba(0,240,255,.4); }
+  /* Dots double as the touch control — 26px hit box around a 9px dot. */
+  #attractDots { display:flex; gap:6px; justify-content:center; margin:6px auto 22px; }
+  .adot { pointer-events:auto; cursor:pointer; width:26px; height:26px; padding:0; border:none;
+          background:none; display:flex; align-items:center; justify-content:center; }
+  .adot::after { content:''; width:9px; height:9px; border-radius:50%;
+                 border:1px solid rgba(0,240,255,.45); transition:background .3s, box-shadow .3s; }
+  .adot:hover::after { border-color:#00f0ff; }
+  .adot.on::after { background:#00f0ff; border-color:#00f0ff; box-shadow:0 0 10px var(--neon); }
   .key { font-size:12px; color:#bfe9ff; border:1px solid rgba(0,240,255,.3); padding:8px 12px; border-radius:8px;
          background: rgba(0,240,255,.06); }
   .key b { color:#fff; }
@@ -245,21 +277,23 @@
   .submitnote.pending { color:#6f93a6; }
   .submitnote.ok { color:#7be0a0; text-shadow:0 0 8px rgba(90,255,160,.4); }
   .submitnote.off { color:#ff8fb4; text-shadow:0 0 8px rgba(255,46,136,.4); }
-  /* Global leaderboard on the death screen (item 38) */
+  /* Global leaderboard on the death screen (item 38). The table styling is
+     CLASS-scoped (item 54) so the title screen's attract-loop board is the same
+     widget; only #overGlobal's rank headline is death-screen-specific. */
   #overGlobal { margin:0 auto 18px; max-width:460px; }
   #overRank { font-size:13px; letter-spacing:2px; color:#8fb6c9; margin:0 0 12px; }
   #overRank b { color:#fff; font-size:19px; text-shadow:0 0 12px var(--neon); }
   #overRank.first b { color:#ff2e88; text-shadow:0 0 12px rgba(255,46,136,.7); }
-  #overBoard { width:100%; border-collapse:collapse; font-size:12px; letter-spacing:1px; }
-  #overBoard th { font-size:9px; letter-spacing:2px; color:#5f7f92; font-weight:700;
-                  text-align:right; padding:0 8px 6px; border-bottom:1px solid rgba(0,240,255,.2); }
-  #overBoard th:nth-child(2) { text-align:left; }
-  #overBoard td { padding:5px 8px; color:#9fe9ff; text-align:right; }
-  #overBoard td:first-child { color:#6f93a6; }
-  #overBoard td:nth-child(2) { text-align:left; color:#bfe9ff;
-                               max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  #overBoard tr.you td { color:#fff; text-shadow:0 0 8px rgba(255,46,136,.6); }
-  #overBoard tr.you td:first-child { color:#ff2e88; }
+  .gboard { width:100%; border-collapse:collapse; font-size:12px; letter-spacing:1px; }
+  .gboard th { font-size:9px; letter-spacing:2px; color:#5f7f92; font-weight:700;
+               text-align:right; padding:0 8px 6px; border-bottom:1px solid rgba(0,240,255,.2); }
+  .gboard th:nth-child(2) { text-align:left; }
+  .gboard td { padding:5px 8px; color:#9fe9ff; text-align:right; }
+  .gboard td:first-child { color:#6f93a6; }
+  .gboard td:nth-child(2) { text-align:left; color:#bfe9ff;
+                            max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .gboard tr.you td { color:#fff; text-shadow:0 0 8px rgba(255,46,136,.6); }
+  .gboard tr.you td:first-child { color:#ff2e88; }
   #pauseHint { position:absolute; top:22px; left:50%; transform:translateX(-50%); margin-top:54px;
                font-size:11px; color:#6f93a6; letter-spacing:2px; pointer-events:none; }
   #fps { position:absolute; top:8px; right:8px; font-size:11px; color:#6f93a6; letter-spacing:1px;
@@ -331,17 +365,45 @@
     <div class="sub">CLEAR THE ARENA. SWITCH WEAPONS. SURVIVE THE SWARM.</div>
     <div class="verbadge">__VERSION__</div>
     <div class="best" id="bestWrap" style="display:none">BEST <b id="bestScore">0</b></div>
-    <div class="keys">
-      <div class="key"><b>WASD</b> Move</div>
-      <div class="key"><b>MOUSE</b> Aim</div>
-      <div class="key"><b>CLICK</b> Fire</div>
-      <div class="key"><b>1·2·3</b> Weapons</div>
-      <div class="key"><b>SHIFT</b> Sprint</div>
-      <div class="key"><b>Q</b> Dash</div>
-      <div class="key"><b>E</b> Nova</div>
-      <div class="key"><b>SPACE</b> Jump</div>
-      <div class="key"><b>R</b> Reload</div>
-      <div class="key"><b>ESC / P</b> Pause</div>
+    <!-- Attract loop (item 54). ROTATING zone only: everything below #attractDots
+         is pinned and must never move as panels change. Panels are absolutely
+         positioned so the crossfade cannot reflow the card. -->
+    <div id="attract">
+      <div class="apanel show" id="panelKeys">
+        <div class="atitle">CONTROLS</div>
+        <div class="keys">
+          <div class="key"><b>WASD</b> Move</div>
+          <div class="key"><b>MOUSE</b> Aim</div>
+          <div class="key"><b>CLICK</b> Fire</div>
+          <div class="key"><b>1·2·3</b> Weapons</div>
+          <div class="key"><b>SHIFT</b> Sprint</div>
+          <div class="key"><b>Q</b> Dash</div>
+          <div class="key"><b>E</b> Nova</div>
+          <div class="key"><b>SPACE</b> Jump</div>
+          <div class="key"><b>R</b> Reload</div>
+          <div class="key"><b>ESC / P</b> Pause</div>
+        </div>
+      </div>
+      <div class="apanel" id="panelBoard">
+        <div class="atitle">GLOBAL TOP 10</div>
+        <table class="gboard" id="menuBoard"><tbody></tbody></table>
+        <div id="menuBoardMsg">LOADING…</div>
+      </div>
+      <div class="apanel" id="panelIntel">
+        <div class="atitle">INTEL</div>
+        <ul class="intel">
+          <li><b>BLASTER</b> never runs dry. Shotgun and rocket carry reserves — reload with <b>R</b>.</li>
+          <li><b>ELITES</b> are bigger and tinted, and they <b>always</b> drop a pickup. Hunt them.</li>
+          <li><b>NOVA [E]</b> charges on every kill — bosses give three times as much.</li>
+          <li><b>DASH [Q]</b> grants i-frames. Dash <b>through</b> the hit, not away from it.</li>
+          <li>Every <b>5th</b> wave is a boss. Every <b>7th</b> rolls a <b>MUTATOR</b> — read the banner.</li>
+        </ul>
+      </div>
+    </div>
+    <div id="attractDots">
+      <button type="button" class="adot on" data-panel="0" aria-label="Controls"></button>
+      <button type="button" class="adot" data-panel="1" aria-label="Global top 10"></button>
+      <button type="button" class="adot" data-panel="2" aria-label="Intel"></button>
     </div>
     <div id="settings">
       <h2>SETTINGS</h2>
@@ -374,7 +436,7 @@
     </div>
     <div id="overGlobal" style="display:none">
       <div id="overRank"></div>
-      <table id="overBoard"><tbody></tbody></table>
+      <table class="gboard" id="overBoard"><tbody></tbody></table>
     </div>
     <button id="againBtn">↻ RUN IT BACK</button>
   </div>
@@ -2828,6 +2890,102 @@ function drawMinimap() {
 }
 
 // ===========================================================================
+// Title-screen attract loop (item 54)
+// ===========================================================================
+// Rotating KEYBINDS / GLOBAL TOP 10 / INTEL panels. Ticked from animate() next to
+// updateEnv() — deliberately NOT a setInterval: a stray interval would keep firing
+// during gameplay and a second visit to the title would stack another one.
+//
+// These element refs are DELIBERATELY separate consts from the `overlay` /
+// `startCard` ones further down: animate() is called synchronously at the bottom of
+// this section, long before those initialize, so reading them here would throw a TDZ
+// ReferenceError out of module evaluation and trip the CDN-failure fatal card.
+const atOverlay = document.getElementById('overlay');
+const atCard = document.getElementById('startCard');
+const atZone = document.getElementById('attract');
+const atPanels = [...atZone.querySelectorAll('.apanel')];
+const atDots = [...document.querySelectorAll('.adot')];
+const atBoard = document.querySelector('#menuBoard tbody');
+const atBoardMsg = document.getElementById('menuBoardMsg');
+const PANEL_SECS = 7;
+
+let panelIdx = 0, panelT = 0, attractShown = false;
+// Board payload shared with the death screen. Fetched at most once per session from
+// the menu; refreshed for free from the death screen's rank GET / submit POST.
+let boardCache = null, boardFetching = false;
+
+function cacheBoard(data) {
+  if (data && Array.isArray(data.top) && Number.isFinite(data.total))
+    boardCache = { top: data.top, total: data.total };
+}
+
+function showPanel(i) {
+  panelIdx = i; panelT = 0;
+  atPanels.forEach((p, j) => p.classList.toggle('show', j === i));
+  atDots.forEach((d, j) => d.classList.toggle('on', j === i));
+}
+
+function paintMenuBoard() {
+  const top = boardCache ? boardCache.top : [];
+  if (!top.length) {
+    atBoard.innerHTML = '';
+    atBoardMsg.textContent = boardCache ? 'NO RUNS YET — BE THE FIRST' : 'OFFLINE — BOARD UNAVAILABLE';
+    atBoardMsg.style.display = '';
+    return;
+  }
+  atBoard.innerHTML = BOARD_HEAD + boardRows(top, null, 0, 0);
+  atBoardMsg.textContent = `${boardCache.total} RUN${boardCache.total === 1 ? '' : 'S'} WORLDWIDE`;
+  atBoardMsg.style.display = '';
+}
+
+// ONE fetch per session, not one per rotation: GET /api/scores mints a submit token
+// on every call. The token this returns is thrown away on purpose — fetchRunToken()
+// owns the run's token, and TOKEN_TTL_MS can expire while the player sits on the menu.
+async function loadMenuBoard() {
+  if (boardCache || boardFetching) { paintMenuBoard(); return; }
+  boardFetching = true;
+  atBoardMsg.textContent = 'LOADING…'; atBoardMsg.style.display = '';
+  try {
+    const r = await fetch('/api/scores');
+    if (!r.ok) throw new Error('http ' + r.status);   // `make serve` 404s with HTML
+    cacheBoard(await r.json());
+  } catch {
+    // Board panel shows OFFLINE; the loop keeps rotating and never throws.
+  }
+  boardFetching = false;
+  paintMenuBoard();
+}
+
+atDots.forEach(d => d.addEventListener('click', () => {
+  showPanel(+d.dataset.panel);
+  // Buttons keep focus after a click in Chrome, and focus inside the card pauses
+  // the rotation — without this, tapping a dot would freeze the loop for good.
+  d.blur();
+}));
+
+// Visibility is DERIVED, not hooked at every show/hide site: `againBtn` re-shows
+// #startCard and startGame() then hides only #overlay, so the card keeps its
+// un-hidden class for the rest of the session. Testing both is what guarantees
+// "no rotation work while a run is in progress".
+function attractVisible() {
+  return !atOverlay.classList.contains('hidden') && !atCard.classList.contains('hidden');
+}
+
+function updateAttract(dt) {
+  const shown = attractVisible();
+  if (shown !== attractShown) {
+    attractShown = shown;
+    if (shown) { showPanel(0); loadMenuBoard(); }   // every visit starts on panel 1
+    return;                                         // no dwell on the transition frame
+  }
+  if (!shown) return;                               // zero work during a run
+  // Don't yank the panel away from someone reading the board or dragging a slider.
+  if (atZone.matches(':hover') || atCard.contains(document.activeElement)) return;
+  panelT += dt;
+  if (panelT >= PANEL_SECS) showPanel((panelIdx + 1) % atPanels.length);
+}
+
+// ===========================================================================
 // Loop
 // ===========================================================================
 const fpsEl = document.getElementById('fps');
@@ -2841,6 +2999,7 @@ function animate() {
   if (slow !== slowmoOn) { slowmoOn = slow; document.body.classList.toggle('slowmo', slow); }
   if (state.running && !state.paused && !state.choosing) update(dt);
   updateEnv(raw);   // item 31: arena idles alive regardless of pause/choosing state
+  updateAttract(raw);   // item 54: title-screen panel rotation (no-ops during a run)
   if (settings.bloom) composer.render(); else renderer.render(scene, camera);
   if (settings.showFps) {
     fpsFrames++; fpsTime += raw;
@@ -3014,6 +3173,7 @@ async function submitScore(name, score, wave, token) {
     submitNote.className = 'submitnote ok';
     submitMsg.textContent = `SCORE SUBMITTED AS ${name || 'ANON'}`;
     editNameBtn.style.display = '';
+    cacheBoard(data);   // item 54: freshest board, zero extra requests
     // The POST already carries {rank,total,top} — render the board with no 2nd
     // request. renderGlobalBoard reveals #overGlobal; leave it hidden on failure.
     boardFinal = true;
@@ -3038,6 +3198,7 @@ async function fetchDeathRank(score, wave) {
     const r = await fetch('/api/scores?score=' + score);
     if (!r.ok) return;            // `make serve` 404s with an HTML body — never .json() it
     const data = await r.json();
+    cacheBoard(data);             // item 54: freshest board, zero extra requests
     if (boardFinal) return;       // a POST already drew the you-row; don't undo it
     // total+1 counts this run as if it were already in: the headline then reads
     // identically before and after SUBMIT instead of ticking up by one, and an
@@ -3133,18 +3294,23 @@ function renderGlobalBoard(data, name, score, wave) {
     rankEl.innerHTML = `YOU RANKED <b>#${rank}</b> OF <b>${total}</b> WORLDWIDE`;
   }
 
-  // Top-10 table. Highlight the player's own row: first entry matching this run
-  // by name+score+wave (rows carry no id, and array index ≠ rank under ties).
+  body.innerHTML = BOARD_HEAD + boardRows(top, name, score, wave);
+  global.style.display = '';
+}
+
+// Shared by the death screen and the title screen's attract loop (item 54).
+// Highlight the player's own row: first entry matching this run by name+score+wave
+// (rows carry no id, and array index ≠ rank under ties). Pass name=null for a
+// board with no run to highlight — no stored name can ever === null.
+const BOARD_HEAD = '<tr><th>#</th><th>PILOT</th><th>SCORE</th><th>WAVE</th></tr>';
+function boardRows(top, name, score, wave) {
   let matched = false;
-  const rows = top.map((r, i) => {
+  return top.map((r, i) => {
     const isYou = !matched && r.name === name && r.score === score && r.wave === wave;
     if (isYou) matched = true;
     return `<tr class="${isYou ? 'you' : ''}"><td>${i + 1}</td><td>${escapeHtml(r.name)}</td>` +
            `<td>${r.score}</td><td>${r.wave}</td></tr>`;
   }).join('');
-  body.innerHTML =
-    '<tr><th>#</th><th>PILOT</th><th>SCORE</th><th>WAVE</th></tr>' + rows;
-  global.style.display = '';
 }
 
 // Escape a leaderboard name for innerHTML. Names are already sanitized server-side
