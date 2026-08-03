@@ -961,6 +961,9 @@ const sfx = {
                  noiseBurst(0.45, 0.3); },
   novaReady: () => { beep({ freq: 520, slideTo: 1040, type: 'triangle', dur: 0.12, vol: 0.14 });
                      beep({ freq: 780, slideTo: 1560, type: 'triangle', dur: 0.16, vol: 0.12, delay: 0.1 }); },
+  laser: () => { beep({ freq: 180, slideTo: 1500, type: 'sawtooth', dur: 0.45, vol: 0.15 });
+                 beep({ freq: 62, slideTo: 95, type: 'square', dur: 0.7, vol: 0.11 });
+                 noiseBurst(0.3, 0.12); },
   heartbeat: () => { beep({ freq: 55, type: 'sine', dur: 0.14, vol: 0.45 });
                      beep({ freq: 50, type: 'sine', dur: 0.12, vol: 0.32, delay: 0.16 }); },
 };
@@ -1745,6 +1748,8 @@ function spawnRandomPickup(forceType) {
 const state = { running: false, paused: false, choosing: false, rerolled: false, score: 0, wave: 0, toSpawn: 0, spawnTimer: 0,
                 combo: 1, comboTimer: 0, betweenWaves: 0, pickupTimer: 8, shake: 0, time: 0, slowmo: 0, ult: 0, mutator: null,
                 lastHitBy: null, upgrades: [],
+                // item 19 laser sweep: 'off' | 'arm' | 'warn' | 'sweep'
+                laserPhase: 'off', laserT: 0, laserDur: 0, laserAngle: 0, laserDir: 1, laserCD: 0, laserBeep: 0,
                 stats: { shots: 0, hits: 0, crits: 0, kills: 0, bestCombo: 1, style: 0, dmgDealt: 0, dmgTaken: 0, wkills: {} } };
 
 // Challenge waves: every 7th wave rolls one mutator, announced with a banner and
@@ -1789,12 +1794,14 @@ function startWave(n) {
   }
   if (n % 2 === 0) spawnRandomPickup('health');
   if (n % 5 === 0) { spawnBoss(n); spawnRandomPickup('ammo'); }
+  armLaser(n);   // item 19: one sweep per wave from wave 6 (also clears any leftover)
   setMood(n);   // item 28: drift arena lighting/fog toward this wave's mood (mutator already set above)
 }
 function nextWaveCheck() {
   if (state.running && state.toSpawn === 0 && enemies.length === 0 && state.betweenWaves <= 0) {
     state.betweenWaves = 2.5;
     clearMutator();   // score bonus + effects end with the last kill of the wave
+    endLaser();       // item 19: never leave a beam frozen behind the upgrade cards
     showUpgrades();   // halts the countdown (update() skips while choosing)
   }
 }
@@ -2043,18 +2050,21 @@ function spawnJaggedTracer(from, to) {
 function damageEnemy(enemy, dmg, point, crit, kw, kdist, src) {
   if (enemy.elite === 'SHIELDED' && !crit) dmg *= 0.75;   // flat 25% DR, crits ignore it
   if (state.mutator && state.mutator.dmgMul) dmg *= state.mutator.dmgMul;   // BERSERK: everything hits harder
-  if (src !== 'ENEMY') state.stats.dmgDealt += dmg;
+  if (src !== 'ENEMY' && src !== 'LASER') state.stats.dmgDealt += dmg;   // arena hazard / enemy chains aren't the player's doing
   enemy.hp -= dmg; enemy.damageTimer = 0.12;
   // Boss phase 2 at < 50% hp. phase flips inside bossEnrage, so this can never
   // double-trigger; an overkill hit (hp <= 0) skips straight to killEnemy.
   if (enemy.type === 'boss' && enemy.phase === 1 && enemy.hp > 0 && enemy.hp < enemy.maxHp / 2) bossEnrage(enemy);
-  spawnDamageNumber(point || enemy.mesh.position, dmg, crit);
-  showHitmark(crit);
+  // Item 19: the laser sweep is arena furniture, not a shot the player took —
+  // it must not drive the player's own hit feedback. A live sweep across a full
+  // wave would otherwise strobe the crosshair and hit blip for hundreds of frames.
+  const byPlayer = src !== 'LASER';
+  if (byPlayer) { spawnDamageNumber(point || enemy.mesh.position, dmg, crit); showHitmark(crit); }
   if (crit) {
     sfx.crit(); state.stats.crits++; if (point) burst(point, 0xffe23a, 10, 14);
     if (mods.chainCrit) chainLightning(enemy, point || enemy.mesh.position.clone());
   }
-  else sfx.hit();
+  else if (byPlayer) sfx.hit();
   if (point) burst(point, enemy.color, 6, 10);
   if (enemy.hp <= 0) killEnemy(enemy, kw, kdist, src);
 }
@@ -2193,6 +2203,176 @@ function explodeRocket(pos) {
   // self splash if too close
   const pd = player.pos.distanceTo(pos);
   if (pd < splash * 0.7) damagePlayer(20 * (1 - pd / (splash * 0.7)), null, 'YOUR OWN ROCKET');
+}
+
+// ===========================================================================
+// Arena hazard: laser sweep (item 19) — from wave 6 on, the centre pylon fires
+// a horizontal beam once per wave that rotates a full 360°. Visuals are
+// persistent meshes (pylon + one beam), hidden when idle — same pattern as
+// NOVA, nothing to pool.
+//
+// NO PointLight, deliberately, though the spec sketch called for one. A light
+// costs every lit material scene-wide for as long as it is in the scene (not
+// just while firing), and side-by-side frames showed it contributing nothing
+// the emissive + bloom wasn't already doing — while washing the whole arena
+// magenta whenever the beam swung past the camera. This is the emissive-plus-
+// basic-core fallback the HQ point-light note prescribes.
+//
+// Collision is deliberately 2D. collideArena() keeps the player out of every
+// obstacle AABB with no height test, so the player can never be above the
+// beam — "a jump does not clear it" falls out for free. Flying wasps DO get to
+// pass over it, so the enemy test gates on height.
+// ===========================================================================
+const LASER_WAVE = 6;       // first wave that arms a sweep
+const LASER_WARN = 2.0;     // ghost-beam telegraph before the beam goes live
+const LASER_Y = 1.5;        // torso height
+const LASER_HALF = 0.5;     // beam half-width for collision
+const LASER_TOP = 2.6;      // anything whose underside clears this flies over
+const LASER_R0 = 4.5;       // beam starts outside the centre pillar (hw 4)
+const LASER_ORIG = 6;       // line-of-sight ray origin: past the pillar's corner (√32 ≈ 5.66)
+const LASER_DMG = 15, LASER_CD = 0.5, LASER_KNOCK = 2.4;
+// Core tints as Color objects, not raw channels: these are lerped/copied, so
+// they must live in the same working space three.js builds a hex into — setRGB
+// would treat the numbers as linear and render the idle core visibly hotter.
+const LASER_COLD = new THREE.Color(0x3a0810);
+const LASER_HOT = new THREE.Color(0xff5a5a);
+
+// Shared materials: the pylon shell (emissive), and ONE hot-core material worn
+// by the core rod, the head ring and the floor collar, so charging up is a
+// single color write per frame.
+const laserShellMat = new THREE.MeshStandardMaterial({ color: 0x160a12, emissive: 0xff2020,
+                                                       emissiveIntensity: 0.2, metalness: 0.6, roughness: 0.45 });
+const laserCoreMat = new THREE.MeshBasicMaterial({ color: LASER_COLD });
+{
+  const pylon = new THREE.Group();
+  const shell = new THREE.Mesh(new THREE.BoxGeometry(1.3, 10, 1.3), laserShellMat);
+  shell.position.y = 11; shell.castShadow = true;
+  const rod = new THREE.Mesh(new THREE.BoxGeometry(0.45, 10.4, 0.45), laserCoreMat);
+  rod.position.y = 11;
+  const head = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.9, 2.4), laserShellMat);
+  head.position.y = 15.9;
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.6, 0.12, 6, 24), laserCoreMat);
+  ring.rotation.x = Math.PI / 2; ring.position.y = 15.9;
+  // Aperture collar at beam height, just outside the centre pillar — this is
+  // what makes the beam read as coming OUT of the pillar rather than nowhere.
+  const collar = new THREE.Mesh(new THREE.TorusGeometry(LASER_ORIG, 0.16, 6, 32), laserCoreMat);
+  collar.rotation.x = Math.PI / 2; collar.position.y = LASER_Y;
+  pylon.add(shell, rod, head, ring, collar);
+  scene.add(pylon);
+}
+const laserGlowMat = new THREE.MeshBasicMaterial({ color: 0xff3a3a, transparent: true, opacity: 0,
+                                                   depthWrite: false, blending: THREE.AdditiveBlending });
+const laserBeamMat = new THREE.MeshBasicMaterial({ color: 0xffd6d6, transparent: true, opacity: 0, depthWrite: false });
+const laserBeam = new THREE.Group();
+{
+  const len = ARENA - 1 - LASER_R0;
+  const glow = new THREE.Mesh(new THREE.BoxGeometry(len, 1.1, 1.1), laserGlowMat);
+  const core = new THREE.Mesh(new THREE.BoxGeometry(len, 0.24, 0.24), laserBeamMat);
+  glow.position.x = core.position.x = LASER_R0 + len / 2;
+  laserBeam.add(glow, core);
+}
+laserBeam.position.y = LASER_Y;
+laserBeam.visible = false;
+scene.add(laserBeam);
+
+// Settle every laser visual back to idle. Called on wave start/clear, death and
+// reset: animate() renders unconditionally, so a run that ends mid-sweep would
+// otherwise leave a lit pylon burning behind the death card and the title.
+function endLaser() {
+  state.laserPhase = 'off'; state.laserT = 0; state.laserCD = 0; state.laserBeep = 0;
+  laserBeam.visible = false;
+  laserGlowMat.opacity = laserBeamMat.opacity = 0;
+  laserShellMat.emissiveIntensity = 0.2;
+  laserCoreMat.color.copy(LASER_COLD);
+}
+function armLaser(n) {
+  endLaser();
+  if (n < LASER_WAVE) return;
+  state.laserPhase = 'arm';
+  state.laserT = 5 + Math.random() * 5;                       // fires 5–10 s into the wave
+  state.laserDur = Math.max(5.5, 9 - (n - LASER_WAVE) * 0.25); // later waves sweep faster
+}
+function updateLaser(dt) {
+  if (state.laserPhase === 'off') return;
+
+  if (state.laserPhase === 'arm') {
+    state.laserT -= dt;
+    if (state.laserT > 0) return;
+    state.laserPhase = 'warn'; state.laserT = LASER_WARN; state.laserBeep = 0;
+    state.laserAngle = Math.random() * Math.PI * 2;
+    state.laserDir = Math.random() < 0.5 ? 1 : -1;
+    laserBeam.rotation.y = state.laserAngle;
+    laserBeam.visible = true;
+    flashTip('⚠ LASER SWEEP CHARGING', '#ff5a5a');
+  }
+
+  if (state.laserPhase === 'warn') {
+    state.laserT -= dt;
+    state.laserBeep -= dt;
+    if (state.laserBeep <= 0) { sfx.warn(); state.laserBeep = 0.4; }
+    const b = 0.35 + 0.65 * Math.abs(Math.sin(state.laserT * 7));
+    laserGlowMat.opacity = 0.3 * 0.2;          // spec: ghost at 20% of the live beam
+    laserBeamMat.opacity = 0.95 * 0.2;
+    laserShellMat.emissiveIntensity = 0.2 + 0.9 * b;
+    laserCoreMat.color.copy(LASER_COLD).lerp(LASER_HOT, b);
+    if (state.laserT > 0) return;
+    state.laserPhase = 'sweep'; state.laserT = state.laserDur;
+    sfx.laser();
+    flashCombo('☢ LASER SWEEP', '#ff3a3a');
+    state.shake = Math.min(0.5, state.shake + 0.2);
+  }
+
+  // ----- live sweep -----
+  state.laserT -= dt;
+  state.laserAngle += state.laserDir * (Math.PI * 2 / state.laserDur) * dt;
+  laserBeam.rotation.y = state.laserAngle;
+  const flick = 0.88 + 0.12 * Math.sin(state.time * 47);
+  laserGlowMat.opacity = 0.3 * flick;
+  laserBeamMat.opacity = 0.95 * flick;
+  laserShellMat.emissiveIntensity = 1.3;
+  laserCoreMat.color.copy(LASER_HOT);
+
+  // Beam direction: rotation.y = a maps +X to (cos a, -sin a) in world x/z.
+  const dx = Math.cos(state.laserAngle), dz = -Math.sin(state.laserAngle);
+  const ox = dx * LASER_ORIG, oz = dz * LASER_ORIG;   // LOS origin, clear of the centre pillar
+
+  // ----- player -----
+  state.laserCD -= dt;
+  const px = player.pos.x, pz = player.pos.z;
+  const perp = px * dz - pz * dx;   // signed offset from the beam axis
+  if (state.laserCD <= 0 && px * dx + pz * dz > 0 && Math.abs(perp) < LASER_HALF + player.radius &&
+      !segBlocked(ox, oz, px, pz)) {
+    state.laserCD = LASER_CD;
+    // Shove clear of the axis. Nudging player.pos (not player.vel) is the only
+    // thing that reads: the movement code lerps velocity toward the input
+    // target every frame, so an impulse would be gone in ~4 frames.
+    const s = perp >= 0 ? 1 : -1;
+    player.pos.x += dz * s * LASER_KNOCK;
+    player.pos.z += -dx * s * LASER_KNOCK;
+    collideArena(player.pos, player.radius);
+    burst(player.pos, 0xff3a3a, 8, 10, 0.18);
+    emitRipple(player.pos.x, player.pos.z, 0.8);
+    damagePlayer(LASER_DMG, _tmpB.set(0, LASER_Y, 0), 'LASER SWEEP');
+  }
+
+  // ----- enemies (it cuts both ways — lure play) -----
+  // Reverse index walk, no snapshot array: damageEnemy can kill, and killEnemy
+  // splices the current index out from under us.
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const e = enemies[i];
+    if (!e || e.hp <= 0) continue;                       // a cascade already took it
+    if (e._laserT > 0) { e._laserT -= dt; continue; }
+    const ep = e.mesh.position;
+    if (ep.y - e.radius > LASER_TOP) continue;           // wasps cruising above the beam
+    if (ep.x * dx + ep.z * dz <= 0) continue;
+    if (Math.abs(ep.x * dz - ep.z * dx) > LASER_HALF + e.radius) continue;
+    if (segBlocked(ox, oz, ep.x, ep.z)) continue;
+    e._laserT = LASER_CD;
+    burst(ep, 0xff3a3a, 5, 9);
+    damageEnemy(e, LASER_DMG, null, false, null, null, 'LASER');
+  }
+
+  if (state.laserT <= 0) endLaser();
 }
 
 // ===========================================================================
@@ -2708,6 +2888,8 @@ function update(dt) {
       if (d > 0 && d < min) { const push = (min - d) / 2 / d; a.x -= dx * push; a.z -= dz * push; b.x += dx * push; b.z += dz * push; }
     }
 
+  updateLaser(dt);   // item 19: after enemy movement, so the beam tests final positions
+
   // ----- rockets -----
   for (let i = rockets.length - 1; i >= 0; i--) {
     const r = rockets[i]; r.life -= dt;
@@ -2867,6 +3049,16 @@ function drawMinimap() {
   for (const o of obstacles) {
     const [px, pz] = w2m(o.mesh.position.x, o.mesh.position.z);
     mctx.fillRect(px - o.hw * MSCALE, pz - o.hd * MSCALE, o.hw * 2 * MSCALE, o.hd * 2 * MSCALE);
+  }
+  // laser sweep (item 19) — drawn over the pillars so cover reads at a glance
+  if (state.laserPhase === 'warn' || state.laserPhase === 'sweep') {
+    const live = state.laserPhase === 'sweep';
+    const ldx = Math.cos(state.laserAngle), ldz = -Math.sin(state.laserAngle);
+    const [lax, laz] = w2m(ldx * LASER_R0, ldz * LASER_R0);
+    const [lbx, lbz] = w2m(ldx * ARENA, ldz * ARENA);
+    mctx.strokeStyle = live ? '#ff3a3a' : 'rgba(255,58,58,0.45)';
+    mctx.lineWidth = live ? 2.5 : 1.5;
+    mctx.beginPath(); mctx.moveTo(lax, laz); mctx.lineTo(lbx, lbz); mctx.stroke();
   }
   // pickups
   for (const p of pickups) {
@@ -3405,6 +3597,7 @@ function resetGame() {
   state.score = 0; state.wave = 0; state.combo = 1; state.comboTimer = 0;
   state.toSpawn = 0; state.betweenWaves = 0; state.pickupTimer = 8; state.shake = 0;
   state.time = 0; state.slowmo = 0; state.choosing = false; state.rerolled = false; state.mutator = null;
+  endLaser();         // item 19: hazard beam + pylon glow back to idle
   setMood(1, true);   // item 28: snap arena mood back to the wave-1 baseline on restart
   resetEnv();         // item 31: settle trims/caps/dust glitch state to idle
   gridUniforms.uTime.value = 0; gridUniforms.uRipples.value.forEach(r => r.set(0, 0, -1e3, 0)); rippleIdx = 0;
@@ -3431,6 +3624,7 @@ function startGame() {
 function gameOver() {
   state.running = false; state.paused = false;
   state.mutator = null;   // death mid-mutator must not leak into the next run
+  endLaser();             // ditto a sweep still in flight when we died
   state.choosing = false; upgradeEl.classList.add('hidden');
   if (!isTouch) document.exitPointerLock();
   const st = state.stats;
