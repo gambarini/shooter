@@ -1474,11 +1474,64 @@ function spawnScorch(x, z, color, radius) {
   d.mesh.material.color.setHex(color); d.mesh.material.opacity = 0.5; d.mesh.visible = true;
   d.life = SCORCH_LIFE;
 }
-// One call per kill; boss detonations are bigger (ring 12 vs 6).
-function spawnDeathVFX(pos, color, isBoss) {
+// Gib debris (item 50) — the physical layer under the spark burst: chunks of the hull
+// that fly out, bounce once off the floor and fade. Chunks are dark hulls with the
+// enemy's emissive, same as the enemy material, so they read as pieces of the thing you
+// just shot rather than more sparks.
+// The pool is FIXED at GIB_MAX and pre-built at boot, so a kill never allocates mid-frame.
+// When it is spent, the oldest live chunk is recycled rather than the kill silently getting
+// no debris (same trade the scorch decals make with their 16-slot round robin) — a NOVA into
+// a packed wave would otherwise leave most of the corpses with a ring, a flash and nothing
+// physical. Cost stays bounded at GIB_MAX no matter the kill rate.
+const GIB_MAX = 48, GIB_LIFE = 0.9, GIB_GRAV = 30, GIB_BOUNCE = 0.42, GIB_FADE = 0.315;
+const gibs = [], gibPool = [];
+const GIB_GEO = new THREE.BoxGeometry(1, 1, 1);
+for (let i = 0; i < GIB_MAX; i++) {
+  const m = new THREE.Mesh(GIB_GEO, new THREE.MeshStandardMaterial({
+    color: 0x120711, emissiveIntensity: 1.6, metalness: 0.4, roughness: 0.35,
+    flatShading: true, transparent: true }));
+  // renderOrder 4 puts chunks after the scorch (2) and shock ring (3): they are solid and
+  // depth-writing, so drawing them first would punch their silhouette out of both.
+  m.frustumCulled = false; m.visible = false; m.renderOrder = 4;
+  gibPool.push(m);
+}
+function freeGib(g) { scene.remove(g.mesh); g.mesh.visible = false; gibPool.push(g.mesh); }
+function spawnGibs(pos, color, count, size, speed) {
+  for (let i = 0; i < count; i++) {
+    if (!gibPool.length) { freeGib(gibs[0]); gibs.shift(); }   // recycle the oldest chunk
+    const m = gibPool.pop();
+    m.material.emissive.setHex(color); m.material.opacity = 1;
+    m.position.set(pos.x, pos.y, pos.z);
+    m.rotation.set(Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28);
+    const s = size * (0.6 + Math.random() * 0.7);
+    // chunky, not cubic — each axis differs so a tumbling chunk never reads as a dice roll
+    const sx = s, sy = s * (0.5 + Math.random()), sz = s * (0.6 + Math.random() * 0.8);
+    m.scale.set(sx, sy, sz);
+    m.visible = true; scene.add(m);
+    // radial in the ground plane, biased upward so chunks arc instead of skidding
+    const a = Math.random() * Math.PI * 2, v = speed * (0.45 + Math.random() * 0.75);
+    const vy = v * (0.5 + Math.random() * 0.7), rest = sy * 0.5;
+    // Life must outlast the arc, or a chunk thrown from a wasp's orbit lane or a boss's
+    // 3.2m hull evaporates in mid-air — the exact "more sparks" read this layer exists to
+    // avoid. Solve the ballistic drop to rest height and keep the fade window on top.
+    const fall = (vy + Math.sqrt(vy * vy + 2 * GIB_GRAV * Math.max(0, pos.y - rest))) / GIB_GRAV;
+    gibs.push({ mesh: m, sx, sy, sz, k: 1,
+      vx: Math.cos(a) * v, vy, vz: Math.sin(a) * v,
+      rx: Math.random() * 12 - 6, ry: Math.random() * 12 - 6, rz: Math.random() * 12 - 6,
+      life: Math.max(GIB_LIFE * (0.8 + Math.random() * 0.4), fall + GIB_FADE + 0.12),
+      bounced: false });
+  }
+}
+// One call per kill; boss detonations are bigger (ring 12 vs 6) and throw the most debris,
+// splitter minis the least — they die in packs, so they are the FPS-sensitive case.
+function spawnDeathVFX(pos, color, isBoss, mini) {
   spawnShockRing(pos.x, pos.z, color, isBoss ? 12 : 6);
   spawnFlash(pos.x, pos.y, pos.z, isBoss ? 5 : 2.2);
   spawnScorch(pos.x, pos.z, color, isBoss ? 3.2 : 1.4);
+  spawnGibs(pos, color,
+    isBoss ? 20 : mini ? 3 + Math.floor(Math.random() * 2) : 5 + Math.floor(Math.random() * 4),
+    isBoss ? 1.15 : mini ? 0.32 : 0.55,
+    isBoss ? 13 : mini ? 7 : 9);
 }
 // Dash trail (AFTERBURN) — pooled stretched boxes dropped along the dash path.
 // Each segment keeps its own material (opacity fades per segment); geometry is shared.
@@ -2164,7 +2217,7 @@ function killEnemy(enemy, kw, kdist, src) {
   const isBoss = enemy.type === 'boss';
   burst(enemy.mesh.position, enemy.color, isBoss ? 60 : 26, isBoss ? 28 : 20, isBoss ? 0.32 : 0.22);
   emitRipple(enemy.mesh.position.x, enemy.mesh.position.z, isBoss ? 1.8 : 1.0);
-  spawnDeathVFX(enemy.mesh.position, enemy.color, isBoss);
+  spawnDeathVFX(enemy.mesh.position, enemy.color, isBoss, enemy.mini);
   disposeEnemy(enemy);
   const idx = enemies.indexOf(enemy); if (idx >= 0) enemies.splice(idx, 1);
   sfx.kill(1 + Math.min(state.combo - 1, 12) * 0.06); if (isBoss) { sfx.explode(); state.shake = Math.min(0.8, state.shake + 0.6); state.slowmo = 0.9; }
@@ -2920,6 +2973,38 @@ function update(dt) {
     d.mesh.material.opacity = 0.5 * Math.max(0, d.life) / SCORCH_LIFE;
     if (d.life <= 0) d.mesh.visible = false;
   }
+  // ----- gib debris (item 50): ballistic arc, ONE dampened floor bounce, then settle -----
+  // Chunks stay fully opaque while they are airborne — a translucent chunk reads as a ghost,
+  // not as a piece of hull — and only fade over the final GIB_FADE seconds.
+  for (let i = gibs.length - 1; i >= 0; i--) {
+    const g = gibs[i]; g.life -= dt;
+    if (g.life <= 0) { freeGib(g); gibs.splice(i, 1); continue; }
+    g.vy -= GIB_GRAV * dt;
+    const m = g.mesh;
+    m.position.x += g.vx * dt; m.position.y += g.vy * dt; m.position.z += g.vz * dt;
+    // rest tracks the shrink, or a fading chunk pins itself to its full-size half-height
+    // and floats off the floor as it gets smaller
+    const rest = g.sy * 0.5 * g.k;
+    if (m.position.y <= rest && g.vy < 0) {
+      m.position.y = rest;
+      if (!g.bounced) {                       // one bounce only — after that it slides to a stop
+        g.bounced = true;
+        g.vy = -g.vy * GIB_BOUNCE; g.vx *= 0.55; g.vz *= 0.55;
+        g.rx *= 0.4; g.ry *= 0.4; g.rz *= 0.4;
+      } else {
+        g.vy = 0;
+        const damp = Math.exp(-9 * dt);       // dt-based, so the slide-out is refresh-rate independent
+        g.vx *= damp; g.vz *= damp;
+      }
+    }
+    m.rotation.x += g.rx * dt; m.rotation.y += g.ry * dt; m.rotation.z += g.rz * dt;
+    if (g.life < GIB_FADE) {
+      const p = g.life / GIB_FADE;
+      m.material.opacity = p;
+      g.k = 0.55 + p * 0.45;                  // 1.0 at the handover, 0.55 as it winks out
+      m.scale.set(g.sx * g.k, g.sy * g.k, g.sz * g.k);
+    }
+  }
 
   pink.intensity = 0.7 + Math.sin(t * 2) * 0.2;
   cyan.intensity = 0.7 + Math.cos(t * 2.3) * 0.2;
@@ -3488,6 +3573,7 @@ function resetGame() {
   dmgNumbers.forEach(n => { scene.remove(n.sprite); n.sprite.visible = false; dmgNumberPool.push(n.sprite); }); dmgNumbers.length = 0;
   shockRings.forEach(freeShockRing); shockRings.length = 0;
   flashes.forEach(freeFlash); flashes.length = 0;
+  gibs.forEach(freeGib); gibs.length = 0;   // item 50: restarting mid-explosion returns every chunk
   scorchDecals.forEach(d => { d.life = 0; d.mesh.visible = false; }); scorchIdx = 0;
   rockets.forEach(freeRocket); rockets.length = 0;
   enemyShots.forEach(freeEnemyShot); enemyShots.length = 0;
