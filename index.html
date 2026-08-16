@@ -602,36 +602,101 @@ const baseAmbient = ambient.intensity;                 // 0.6
 const baseKeyColor = key.color.clone();                // 0x88ccff cool
 const MOOD_BOSS = new THREE.Color(0xff2848);           // menace red the key + fog pull toward
 const _moodMut = new THREE.Color();                    // temp for mutator hex, reused
+// ---------------------------------------------------------------------------
+// Sectors (item 51) — every 10 waves the arena's whole accent palette swaps, so a
+// deep run reads as travelling somewhere. Sectors sit UNDER the mood system: the
+// item-28 wave hue drift and the boss/mutator shifts all operate on the sector's
+// palette, so a mutator still wins outright on the lights and fog and reverts to
+// the sector palette for free when it clears. Palette only — no geometry, no new
+// lights, no new meshes.
+//
+// Sector 1 MUST be byte-identical to the pre-item-51 look, which is why its channels
+// are written with setRGB() against the literals already in the file. `new
+// THREE.Color(0x00f0ff)` is NOT the same value: three r160 has ColorManagement on, so
+// a hex decodes sRGB→linear (~0.871 where the trims use 0.941) and waves 1–10 would
+// visibly shift. Sectors 2+ have no such baseline to preserve and use hex freely.
+const SECTOR_LEN = 10;
+function sectorOf(n) { return Math.floor(Math.max(0, n - 1) / SECTOR_LEN) % SECTORS.length; }
+const SECTORS = [
+  { name: 'NEON GRID', accent: '#9fe9ff',
+    pinkHSL: basePinkHSL, cyanHSL: baseCyanHSL,
+    fog:  baseFogColor.clone(),
+    trim: new THREE.Color().setRGB(0, 0.941, 1),      wall: new THREE.Color(0x0a3a5c),
+    cap:  new THREE.Color().setRGB(1, 0.180, 0.533),  pillar: new THREE.Color(0xff2e88),
+    gridA: new THREE.Color().setRGB(0, 0.94, 1),      gridB: new THREE.Color().setRGB(1, 0.18, 0.53),
+    sky: new THREE.Color().setRGB(1, 1, 1) },
+  { name: 'EMBER VAULT', accent: '#ffc46b', fogTo: 'cyan',
+    pinkHSL: { h: 0.07, s: 1, l: 0.53 }, cyanHSL: { h: 0.74, s: 0.85, l: 0.62 },
+    fog:  new THREE.Color(0x0d0714),
+    trim: new THREE.Color(0xffa33a),   wall: new THREE.Color(0x4a2708),
+    cap:  new THREE.Color(0xa060ff),   pillar: new THREE.Color(0x8a3cff),
+    gridA: new THREE.Color(0xffab45),  gridB: new THREE.Color(0x9a52ff),
+    sky: new THREE.Color(0xffd2a0) },
+  { name: 'TOXIC BLOOM', accent: '#c8ff6b',
+    pinkHSL: { h: 0.24, s: 1, l: 0.5 }, cyanHSL: { h: 0.99, s: 0.9, l: 0.55 },
+    fog:  new THREE.Color(0x060f06),
+    trim: new THREE.Color(0x9cff2e),   wall: new THREE.Color(0x1d4a0a),
+    cap:  new THREE.Color(0xff3020),   pillar: new THREE.Color(0xff2a14),
+    gridA: new THREE.Color(0xa8ff3c),  gridB: new THREE.Color(0xff3a1e),
+    sky: new THREE.Color(0xc8ffb0) },
+  { name: 'GLACIER NULL', accent: '#dff2ff', fogTo: 'cyan',
+    pinkHSL: { h: 0.58, s: 0.55, l: 0.78 }, cyanHSL: { h: 0.62, s: 1, l: 0.6 },
+    // ice-BLUE, not the spec's ice-white: the fog color is also the sky background, and
+    // a near-white one washes out the bloom and the low-HP vignette both.
+    fog:  new THREE.Color(0x070c16),
+    trim: new THREE.Color(0xcfeaff),   wall: new THREE.Color(0x123a6b),
+    cap:  new THREE.Color(0x3a8cff),   pillar: new THREE.Color(0x2f7bff),
+    gridA: new THREE.Color(0xdcf2ff),  gridB: new THREE.Color(0x3d86ff),
+    sky: new THREE.Color(0xcfe4ff) },
+];
 function makeMood() {
   return { pink: new THREE.Color(), cyan: new THREE.Color(), fog: new THREE.Color(),
-           key: new THREE.Color(), fogDensity: 0, ambient: 0 };
+           key: new THREE.Color(), fogDensity: 0, ambient: 0,
+           // item 51 sector surfaces — carried through the same from→to lerp
+           trim: new THREE.Color(), cap: new THREE.Color(), wall: new THREE.Color(),
+           pillar: new THREE.Color(), gridA: new THREE.Color(), gridB: new THREE.Color(),
+           sky: new THREE.Color() };
 }
 const moodFrom = makeMood(), moodTo = makeMood();
 let moodT = MOOD_DUR;                                   // start settled (lights hold base)
 function computeMood(n, mut, out) {
+  // Sector comes from the parameter, never state.wave: resetGame zeroes state.wave
+  // three lines before calling setMood(1, true), so reading it here would compute the
+  // wrong sector on every single restart.
+  const S = SECTORS[sectorOf(n)];
   // Hue drifts ±30° on a 15-wave cycle so waves 1/6/11 read as distinct moods
-  // (0° / +26° / −26°) while staying anchored to the pink/cyan neon identity.
+  // (0° / +26° / −26°) while staying anchored to the sector's accent pair.
   const off = (30 / 360) * Math.sin((n - 1) * (Math.PI * 2 / 15));
-  out.pink.setHSL(basePinkHSL.h + off, basePinkHSL.s, basePinkHSL.l);
-  out.cyan.setHSL(baseCyanHSL.h + off, baseCyanHSL.s, baseCyanHSL.l);
+  out.pink.setHSL(S.pinkHSL.h + off, S.pinkHSL.s, S.pinkHSL.l);
+  out.cyan.setHSL(S.cyanHSL.h + off, S.cyanHSL.s, S.cyanHSL.l);
   out.key.copy(baseKeyColor);
   out.ambient = baseAmbient * (1 - Math.min(0.18, (n - 1) * 0.012));   // dims slightly as waves climb
   out.fogDensity = baseFogDensity * (1 + Math.min(0.4, (n - 1) * 0.028)); // thickens as waves climb
-  out.fog.copy(baseFogColor).lerp(out.pink, 0.07);     // faint warm horizon that drifts with the hue
+  // Faint accent horizon that drifts with the hue. Which accent it leans on is per
+  // sector: mixing a dark base with a saturated amber turns the sky olive, so EMBER
+  // and GLACIER lean on their cool partner instead and get a violet / deep-blue sky
+  // over a warm floor. Sector 1 leans on pink, exactly as before.
+  const fogAcc = S.fogTo === 'cyan' ? out.cyan : out.pink;
+  out.fog.copy(S.fog).lerp(fogAcc, 0.07);
+  // item 51 surfaces pass straight through — the boss/mutator branches below stay
+  // lights-and-fog only, exactly as they were before sectors existed.
+  out.trim.copy(S.trim); out.cap.copy(S.cap); out.wall.copy(S.wall); out.pillar.copy(S.pillar);
+  out.gridA.copy(S.gridA); out.gridB.copy(S.gridB); out.sky.copy(S.sky);
   if (n % 5 === 0) {                                    // boss wave: darker + menacing warm key
     out.ambient *= 0.8;
     out.key.lerp(MOOD_BOSS, 0.55);
-    out.fog.copy(baseFogColor).lerp(MOOD_BOSS, 0.12);
+    out.fog.copy(S.fog).lerp(MOOD_BOSS, 0.12);
   }
   if (mut) {                                            // mutator wave: infect lights + fog with its color
     _moodMut.set(mut.color);
     out.pink.lerp(_moodMut, 0.6);
     out.cyan.lerp(_moodMut, 0.6);
     out.key.lerp(_moodMut, 0.4);
-    out.fog.copy(baseFogColor).lerp(_moodMut, 0.3);
+    out.fog.copy(S.fog).lerp(_moodMut, 0.3);
   }
   return out;
 }
+const _secA = new THREE.Color(), _secB = new THREE.Color();   // applyMood scratch, no per-frame alloc
 function applyMood(k) {
   const e = k * k * (3 - 2 * k);                        // smoothstep — no pop at either end
   pink.color.lerpColors(moodFrom.pink, moodTo.pink, e);
@@ -641,6 +706,27 @@ function applyMood(k) {
   scene.fog.color.lerpColors(moodFrom.fog, moodTo.fog, e);
   scene.fog.density = moodFrom.fogDensity + (moodTo.fogDensity - moodFrom.fogDensity) * e;
   scene.background.copy(scene.fog.color);
+  // --- item 51 sector surfaces ---------------------------------------------
+  // Trim and cap are published as CHANNELS, not as material colors: updateEnv()
+  // rewrites trimMat and every pillar cap each frame from TRIM_*/CAP_*, so writing
+  // the materials here would be stomped within one frame.
+  _secA.lerpColors(moodFrom.trim, moodTo.trim, e);
+  TRIM_R = _secA.r; TRIM_G = _secA.g; TRIM_B = _secA.b;
+  _secA.lerpColors(moodFrom.cap, moodTo.cap, e);
+  CAP_R = _secA.r; CAP_G = _secA.g; CAP_B = _secA.b;
+  // Caps must be pushed, not just published: updateEnv only rewrites them during a boss
+  // pulse, when settling out of one, or on a random data-glitch, so an idle arena would
+  // keep the previous sector's caps for however long until the next glitch happened to
+  // fire. Safe to write here — every updateEnv path that owns the cap color reads the
+  // same CAP_* channels, and it runs after this in the frame.
+  for (const m of pillarCaps) m.color.setRGB(CAP_R, CAP_G, CAP_B);
+  // These four have no per-frame writer, so they are set directly.
+  wallMat.emissive.lerpColors(moodFrom.wall, moodTo.wall, e);
+  pillarMat.emissive.lerpColors(moodFrom.pillar, moodTo.pillar, e);
+  gridUniforms.uGridA.value.lerpColors(moodFrom.gridA, moodTo.gridA, e);
+  gridUniforms.uGridB.value.lerpColors(moodFrom.gridB, moodTo.gridB, e);
+  _secB.lerpColors(moodFrom.sky, moodTo.sky, e);
+  skyStarMat.color.copy(_secB); skyWinMat.color.copy(_secB); skyGlowMat.color.copy(_secB);
 }
 // Kick off a 1.6 s lerp toward wave n's mood (instant=true snaps, for resetGame).
 function setMood(n, instant) {
@@ -648,6 +734,15 @@ function setMood(n, instant) {
   moodFrom.pink.copy(pink.color); moodFrom.cyan.copy(cyan.color);
   moodFrom.key.copy(key.color);   moodFrom.fog.copy(scene.fog.color);
   moodFrom.ambient = ambient.intensity; moodFrom.fogDensity = scene.fog.density;
+  // Snapshot the LIVE sector surfaces, not SECTORS[...] — a restart or a mutator
+  // clearing mid-transition must lerp from where the arena actually is, not pop.
+  moodFrom.trim.setRGB(TRIM_R, TRIM_G, TRIM_B);
+  moodFrom.cap.setRGB(CAP_R, CAP_G, CAP_B);
+  moodFrom.wall.copy(wallMat.emissive);
+  moodFrom.pillar.copy(pillarMat.emissive);
+  moodFrom.gridA.copy(gridUniforms.uGridA.value);
+  moodFrom.gridB.copy(gridUniforms.uGridB.value);
+  moodFrom.sky.copy(skyStarMat.color);
   moodT = instant ? MOOD_DUR : 0;
   if (instant) applyMood(1);
 }
@@ -676,6 +771,11 @@ const GRID_RIPPLES = 8, GRID_RIPPLE_LIFE = 1.4;
 const gridUniforms = {
   uTime:    { value: 0 },
   uRipples: { value: Array.from({ length: GRID_RIPPLES }, () => new THREE.Vector4(0, 0, -1e3, 0)) },
+  // item 51: grid line + ripple-wash colors, lerped by applyMood on a sector change.
+  // Must live in this literal — a key added after the ShaderMaterial is built is ignored.
+  // setRGB, not a hex: these are the exact linear floats the shader used to hardcode.
+  uGridA:   { value: new THREE.Color().setRGB(0, 0.94, 1) },
+  uGridB:   { value: new THREE.Color().setRGB(1, 0.18, 0.53) },
 };
 const grid = new THREE.Mesh(
   new THREE.PlaneGeometry(ARENA * 2, ARENA * 2),
@@ -691,6 +791,8 @@ const grid = new THREE.Mesh(
       }`,
     fragmentShader: /* glsl */`
       uniform float uTime;
+      uniform vec3 uGridA;                      // sector line color (item 51)
+      uniform vec3 uGridB;                      // sector ripple-wash color
       uniform vec4 uRipples[${GRID_RIPPLES}];   // xy = origin, z = birth time, w = strength
       varying vec3 vWorld;
       void main() {
@@ -708,8 +810,8 @@ const grid = new THREE.Mesh(
           float d = abs(distance(vWorld.xz, r.xy) - age * 16.0);
           rip += smoothstep(1.8, 0.0, d) * (1.0 - age / ${GRID_RIPPLE_LIFE}) * r.w;
         }
-        vec3 col = vec3(0.0, 0.94, 1.0) * line * (fade * pulse * 0.4 + rip * 0.9);
-        col += vec3(1.0, 0.18, 0.53) * rip * 0.1;   // faint pink wash inside the ring
+        vec3 col = uGridA * line * (fade * pulse * 0.4 + rip * 0.9);
+        col += uGridB * rip * 0.1;   // faint accent wash inside the ring
         gl_FragColor = vec4(col, 1.0);
       }`,
   }));
@@ -728,7 +830,9 @@ const wallMat = new THREE.MeshStandardMaterial({ color: 0x0a1426, emissive: 0x0a
 // Item 31: all four wall trims share ONE cyan basic material so the living-arena
 // pulse in updateEnv() is a single color write per frame, not one per trim.
 const trimMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff });
-const TRIM_R = 0, TRIM_G = 0.941, TRIM_B = 1;   // base-cyan channels, pulsed against
+// Live trim channels, pulsed against by updateEnv. Sector 1's values; applyMood
+// (item 51) rewrites them as the arena crosses into a new sector.
+let TRIM_R = 0, TRIM_G = 0.941, TRIM_B = 1;
 const walls = [];           // explicit hitscan target list (no scene scraping)
 function makeWall(w, h, d, x, y, z) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
@@ -750,7 +854,7 @@ const pillarMat = new THREE.MeshStandardMaterial({ color: 0x111a30, emissive: 0x
 // pulse in updateEnv() target caps individually) — a small fixed count, so per-cap
 // materials are cheap. Collected here for the per-frame writes.
 const pillarCaps = [];
-const CAP_R = 1, CAP_G = 0.180, CAP_B = 0.533;   // base hot-pink channels
+let CAP_R = 1, CAP_G = 0.180, CAP_B = 0.533;   // live cap channels — see TRIM_R above
 function addPillar(x, z, w, h, d) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), pillarMat);
   m.position.set(x, h / 2, z); m.castShadow = true; m.receiveShadow = true; scene.add(m);
@@ -812,14 +916,19 @@ function updateEnv(dt) {
                     enemies.length > 0 && !between;   // only during the live fight
 
   // --- wall trims: pulse brightness (between-wave state readable from this alone)
-  if (between) {                                       // fast white-cyan throb
+  // Every branch scales the LIVE TRIM_* channels rather than hardcoding any one of
+  // them — since item 51 those channels carry the sector accent, and a hardcoded
+  // red of 0 would strip the color out of an amber or lime sector's trims.
+  if (between) {                                       // fast throb, half-way to white
     const b = 0.55 + 0.45 * Math.sin(et * 4.5);
-    trimMat.color.setRGB(0.5 * b, (TRIM_G + (1 - TRIM_G) * 0.5) * b, TRIM_B * b);
+    trimMat.color.setRGB((TRIM_R + (1 - TRIM_R) * 0.5) * b,
+                         (TRIM_G + (1 - TRIM_G) * 0.5) * b,
+                         (TRIM_B + (1 - TRIM_B) * 0.5) * b);
   } else if (bossFight) {                              // hold dim/steady; caps do the work
-    trimMat.color.setRGB(0, TRIM_G * 0.4, TRIM_B * 0.42);
-  } else {                                             // idle: slow calm cyan breath
+    trimMat.color.setRGB(TRIM_R * 0.4, TRIM_G * 0.4, TRIM_B * 0.42);
+  } else {                                             // idle: slow calm breath
     const b = 0.62 + 0.38 * Math.sin(et * 0.9);
-    trimMat.color.setRGB(0, TRIM_G * b, TRIM_B * b);
+    trimMat.color.setRGB(TRIM_R * b, TRIM_G * b, TRIM_B * b);
   }
 
   // --- pillar caps: menacing pink throb on boss fights, else occasional glitch --
@@ -852,8 +961,12 @@ function updateEnv(dt) {
 // ===========================================================================
 // Sky & horizon — static scenery outside the arena. Built once at load, all
 // materials fog:false (scene fog would fully swallow anything past ~150).
-// Nothing here is touched by update() or resetGame(). 4 draw calls total.
+// Geometry and vertex colors are fixed; since item 51 the three emissive materials
+// below are multiplicatively tinted by applyMood on a sector change (the city slabs
+// are not — they are already near-black, so a tint could only darken them).
+// 4 draw calls total.
 // ===========================================================================
+let skyStarMat = null, skyWinMat = null, skyGlowMat = null;   // item 51 sector tint targets
 {
   const PINK = new THREE.Color(0xff2e88), CYAN = new THREE.Color(0x00f0ff);
 
@@ -875,9 +988,10 @@ function updateEnv(dt) {
   const starGeo = new THREE.BufferGeometry();
   starGeo.setAttribute('position', new THREE.BufferAttribute(sPos, 3));
   starGeo.setAttribute('color', new THREE.BufferAttribute(sCol, 3));
-  scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({
+  skyStarMat = new THREE.PointsMaterial({
     size: 1.2, vertexColors: true, transparent: true, depthWrite: false,
-    blending: THREE.AdditiveBlending, fog: false })));
+    blending: THREE.AdditiveBlending, fog: false });
+  scene.add(new THREE.Points(starGeo, skyStarMat));
 
   // --- Skyline: ring of black slabs + emissive window dots (instanced) -----
   const CITY_R = 250, B_COUNT = 72, WIN_PER = 6;
@@ -911,6 +1025,7 @@ function updateEnv(dt) {
     }
   }
   scene.add(city, wins);
+  skyWinMat = wins.material;
 
   // --- Horizon glow: additive gradient band behind the skyline -------------
   const GLOW_R = 300, GLOW_H = 80;
@@ -931,6 +1046,7 @@ function updateEnv(dt) {
     blending: THREE.AdditiveBlending, fog: false }));
   glow.position.y = GLOW_H / 2 - 4;                          // band hugs the horizon line
   scene.add(glow);
+  skyGlowMat = glow.material;
 }
 
 // ===========================================================================
@@ -1001,6 +1117,11 @@ const sfx = {
   nova:  () => { beep({ freq: 900, slideTo: 45, type: 'sawtooth', dur: 0.55, vol: 0.24 });
                  beep({ freq: 70, slideTo: 30, type: 'sine', dur: 0.6, vol: 0.3 });
                  noiseBurst(0.45, 0.3); },
+  // Sector-change sweep (item 51): a slow rising pad under the banner. Deliberately
+  // quieter and longer than the mutator sting — this is scenery, not a threat.
+  sector: () => { beep({ freq: 180, slideTo: 720, type: 'triangle', dur: 0.7, vol: 0.11 });
+                  beep({ freq: 90, slideTo: 360, type: 'sine', dur: 0.9, vol: 0.13, delay: 0.05 });
+                  beep({ freq: 1080, slideTo: 1440, type: 'sine', dur: 0.35, vol: 0.05, delay: 0.45 }); },
   // Boss intro sting (item 49): sub-bass impact, then a rising glitch sweep that lands
   // under the title card. Every part is WebAudio-scheduled, so it needs no teardown.
   bossIntro: () => { beep({ freq: 110, slideTo: 34, type: 'sawtooth', dur: 0.45, vol: 0.26 });
@@ -1937,6 +2058,22 @@ function startWave(n) {
     // Boss waves get the item-49 title card instead — the WAVE banner would land on top
     // of it (#combo sits mid-screen), and the wave number is already in the HUD.
     if (n % 5 !== 0) flashCombo(`WAVE ${n}`, '#9fe9ff');
+  }
+  // Item 51: crossing into a new sector. Pure function of n — no tracking variable, so
+  // nothing extra to reset. The banner announces it; the palette itself rides setMood
+  // below, which is why the arena re-themes on the same 1.6 s curve as every other
+  // wave transition. Wave 1 is sector 1 and never announces.
+  if (n > 1 && (n - 1) % SECTOR_LEN === 0) {
+    const S = SECTORS[sectorOf(n)];
+    sfx.sector();
+    // Wave 21 is both a sector start and a mutator wave. #combo and #pickuptip are
+    // shared, and the mutator's name + rules are the gameplay-critical half, so it
+    // keeps the banner there; the sector still announces itself with the sweep and,
+    // rather obviously, by repainting the entire arena.
+    if (!state.mutator) {
+      flashCombo(`◈ SECTOR ${Math.floor((n - 1) / SECTOR_LEN) + 1}`, S.accent);
+      flashTip(S.name, S.accent);
+    }
   }
   if (n % 2 === 0) spawnRandomPickup('health');
   if (n % 5 === 0) { spawnBoss(n); spawnRandomPickup('ammo'); }
