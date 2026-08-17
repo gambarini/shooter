@@ -190,11 +190,17 @@
   .key { font-size:12px; color:#bfe9ff; border:1px solid rgba(0,240,255,.3); padding:8px 12px; border-radius:8px;
          background: rgba(0,240,255,.06); }
   .key b { color:#fff; }
-  #startBtn, #againBtn {
+  #startBtn, #againBtn, #titleBtn {
     pointer-events:auto; cursor:pointer; font-weight:800; letter-spacing:2px; font-size:18px;
     color:#05060c; background: linear-gradient(90deg,#00f0ff,#5cf0ff); border:none; padding:16px 46px;
     border-radius:10px; box-shadow:0 0 26px rgba(0,240,255,.6); transition: transform .1s, box-shadow .2s; }
-  #startBtn:hover, #againBtn:hover { transform: scale(1.05); box-shadow:0 0 40px rgba(0,240,255,.9); }
+  #startBtn:hover, #againBtn:hover, #titleBtn:hover { transform: scale(1.05); box-shadow:0 0 40px rgba(0,240,255,.9); }
+  /* Item 57 — secondary action next to RUN IT BACK. Same shape and hit box (touch
+     parity with the primary CTA), quieter skin so the primary still reads first. */
+  #overBtns { display:flex; gap:12px; justify-content:center; align-items:center; flex-wrap:wrap; }
+  #titleBtn { color:#9fe9ff; background:rgba(0,240,255,.07); border:1px solid rgba(0,240,255,.35);
+              padding:15px 30px; box-shadow:0 0 14px rgba(0,240,255,.18); }
+  #titleBtn:hover { color:#dff8ff; background:rgba(0,240,255,.14); box-shadow:0 0 24px rgba(0,240,255,.45); }
   .final { font-size:18px; color:#9fe9ff; margin: 10px 0 22px; }
   .final b { color:#fff; font-size:42px; display:block; }
   #damageflash { position:fixed; inset:0; z-index:6; pointer-events:none; background:#ff2e88; opacity:0; }
@@ -480,7 +486,10 @@
       <div id="overRank"></div>
       <table class="gboard" id="overBoard"><tbody></tbody></table>
     </div>
-    <button id="againBtn">↻ RUN IT BACK</button>
+    <div id="overBtns">
+      <button id="againBtn">↻ RUN IT BACK</button>
+      <button id="titleBtn">← TITLE</button>
+    </div>
   </div>
   <div class="card hidden" id="pauseCard">
     <h1>PAUSED</h1>
@@ -3242,8 +3251,14 @@ let panelIdx = 0, panelT = 0, attractShown = false;
 let boardCache = null, boardFetching = false;
 
 function cacheBoard(data) {
-  if (data && Array.isArray(data.top) && Number.isFinite(data.total))
+  if (data && Array.isArray(data.top) && Number.isFinite(data.total)) {
     boardCache = { top: data.top, total: data.total };
+    // Item 57: BACK TO TITLE can beat the network. A returning player's submit POST
+    // fires at gameOver and resolves whenever it resolves — if they are already on
+    // the title by then, loadMenuBoard() has painted the PRE-run cache. Repaint here
+    // so the panel always shows the freshest data, including the run just finished.
+    if (attractVisible()) paintMenuBoard();
+  }
 }
 
 function showPanel(i) {
@@ -3759,6 +3774,12 @@ function resetGame() {
   bossIntroT = 0; camera.fov = settings.fov; camera.updateProjectionMatrix();
   hideBossCard(true);   // hard cut: no .45s ghost of the last run's boss over wave 1
   dmgDirs.forEach(d => d.style.opacity = 0);
+  // Item 57: the wave readout is written ONLY by startWave(), which used to run a
+  // beat after every resetGame — so nobody saw the stale value. BACK TO TITLE parks
+  // on the menu with the HUD visible behind the card, where the dead run's wave
+  // number would sit. Repaint to 1 (not state.wave's 0) to match both the markup
+  // default on a fresh load and the wave any new run is about to start on.
+  document.querySelector('#wave b').textContent = 1;
   updateScoreUI(); updateHealthUI(); updateWeaponUI();
 }
 
@@ -3817,6 +3838,24 @@ document.getElementById('againBtn').addEventListener('click', () => {
   // the POST body is built synchronously from values captured at gameOver.
   submitTypedName();
   overCard.classList.add('hidden'); startCard.classList.remove('hidden'); startGame();
+});
+// Item 57: the title screen was unreachable after the first run without a reload,
+// so item 54's attract loop only ever ran once per session. Tear the run down HERE
+// rather than leaning on the next startGame() — the arena sits visible behind the
+// title card, and a frozen field of last run's corpses is not a menu backdrop.
+function returnToTitle() {
+  resetGame();                       // idempotent; startGame() calling it again is free
+  state.running = false; state.paused = false;
+  if (!isTouch) document.exitPointerLock();   // gameOver() already did; keep it self-contained
+  overCard.classList.add('hidden'); pauseCard.classList.add('hidden');
+  startCard.classList.remove('hidden'); overlay.classList.remove('hidden');
+  // No attract call here on purpose: updateAttract() derives visibility per frame and
+  // owns the hidden→shown transition (panel 0, board repaint, dwell reset). Driving it
+  // from this site too would double-fire it.
+}
+document.getElementById('titleBtn').addEventListener('click', () => {
+  submitTypedName();                 // same name-safety as RUN IT BACK; no-op otherwise
+  returnToTitle();
 });
 ui.slots.forEach(s => s.addEventListener('click', () => selectWeapon(+s.dataset.w)));
 canvas.addEventListener('click', () => { if (state.running && !isTouch && !pointerLocked) lockPointer(); });
