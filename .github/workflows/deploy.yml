@@ -37,7 +37,14 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # v5 is the release that moved this action to Node 24 (v4 targeted Node 20
+      # and was being force-shimmed onto 24, which annotated every run). v7 is
+      # current and safe here: v6 only changed where the git credentials are
+      # persisted (nothing downstream reads them — the only git use is the
+      # `git describe` below), and v7 only blocks checking out fork PRs for
+      # `pull_request_target` / `workflow_run`, neither of which this workflow
+      # triggers on. Floating on the major, as before, so patch fixes land free.
+      - uses: actions/checkout@v7
         with:
           # The version badge (roadmap item 35) is stamped from `git describe
           # --tags` below, so the tags have to actually be here. Netlify's shallow
@@ -70,7 +77,10 @@ jobs:
           sed "s/>__VERSION__</>$VER</" index.html > dist/index.html
           cp _headers dist/
 
-      - uses: cloudflare/wrangler-action@v3
+      # v4 is the Node 24 release (v3 targeted Node 20). Its ONLY other breaking
+      # change is that the default wrangler version became v4/`latest` — a no-op
+      # here, because wranglerVersion below is pinned explicitly and always was.
+      - uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
