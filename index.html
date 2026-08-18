@@ -35,6 +35,14 @@
   #score b { font-size: 30px; color: #fff; display:block; margin-top:2px; }
   #wave  { top: 22px; left: 50%; transform:translateX(-50%); font-size: 14px; color: #ffd27a; text-align:center; }
   #wave b { font-size: 30px; color: #fff; display:block; margin-top:2px; }
+  /* Item 47 — OVERDRIVE score multiplier: a persistent badge under the score readout.
+     Hidden until wave 20; .on is cleared in resetGame so a restart cannot carry it. */
+  #odmul { display:none; font-style:normal; font-size:13px; font-weight:800; letter-spacing:2px;
+           color:#ff6ec4; text-shadow:0 0 12px var(--hot); margin-top:3px; }
+  #odmul.on { display:block; animation:odPulse 1.8s ease-in-out infinite; }
+  /* Opacity only, deliberately: a text-shadow keyframe repaints the element every frame
+     and this animation runs for the whole remainder of the run. */
+  @keyframes odPulse { 0%,100% { opacity:.7; } 50% { opacity:1; } }
 
   #healthwrap { position:absolute; bottom: 28px; left: 28px; width: 280px; }
   #healthlabel { font-size: 12px; color:#ff8fb4; letter-spacing:2px; margin-bottom:6px; text-shadow:0 0 8px #ff2e88;}
@@ -263,6 +271,30 @@
            text-shadow:0 0 30px var(--hot), 3px 0 0 rgba(0,240,255,.85), -3px 0 0 rgba(255,46,136,.9); }
   }
 
+  /* Item 47 — OVERDRIVE entry banner. Its own element rather than flashCombo, for two
+     reasons: wave 20 is also a boss wave, so the announce has to coexist with the item-49
+     title card (which sits ABOVE centre), and #combo is shared with combo/streak flashes,
+     so the first kill of the wave — about a second in — would wipe it. Lifecycle copies
+     #bosscard exactly: reflow-restarted .show, one timeout, hard cut on teardown. */
+  #odbanner { position:absolute; bottom:clamp(150px,24vh,250px); left:50%; transform:translateX(-50%);
+              width:min(560px,86vw); text-align:center; padding:10px 18px;
+              visibility:hidden; opacity:0; transition:opacity .5s ease-out, visibility 0s linear .5s;
+              background:linear-gradient(90deg, rgba(255,46,136,0), rgba(255,110,196,.18) 30%, rgba(255,110,196,.18) 70%, rgba(255,46,136,0));
+              border-top:1px solid rgba(255,110,196,.5); border-bottom:1px solid rgba(255,110,196,.5); }
+  #odbanner.show { visibility:visible; opacity:1; transition:opacity .12s ease-out, visibility 0s; }
+  #od-name { font-size:clamp(20px,5.5vw,34px); font-weight:800; letter-spacing:clamp(3px,1vw,8px);
+             color:#fff; text-shadow:0 0 26px var(--hot), 2px 0 0 rgba(0,240,255,.8), -2px 0 0 rgba(255,46,136,.9); }
+  #od-sub { margin-top:4px; font-size:12px; font-weight:700; letter-spacing:4px;
+            color:#ff9ec4; text-shadow:0 0 12px var(--hot); }
+  #odbanner.show #od-name { animation:odBannerIn .45s steps(1,end); }
+  @keyframes odBannerIn {
+    0%   { transform:translate(8px,-3px) skewX(-8deg); opacity:.65; }
+    22%  { transform:translate(-7px,3px); opacity:1; }
+    48%  { transform:translate(4px,0) skewX(4deg); }
+    72%  { transform:translate(-2px,-2px); }
+    100% { transform:none; }
+  }
+
   /* Touch controls */
   #touch { position:fixed; inset:0; z-index:7; display:none; pointer-events:none; }
   body.touch #touch { display:block; }
@@ -361,10 +393,11 @@
 
 <div id="hud">
   <div id="crosshair"><div class="dot"></div><div id="hitmark">✕</div></div>
-  <div class="panel" id="score">SCORE<b>0</b></div>
+  <div class="panel" id="score">SCORE<b>0</b><i id="odmul">&#9889; &times;1.5</i></div>
   <div class="panel" id="wave">WAVE<b>1</b></div>
   <div id="combo">COMBO x2</div>
   <div id="pickuptip"></div>
+  <div id="odbanner"><div id="od-name">&#9889; OVERDRIVE</div><div id="od-sub"></div></div>
   <canvas id="minimap" width="160" height="160"></canvas>
   <div id="bosswrap"><div id="bosslabel">⚠ BOSS</div><div id="bossbar"><div id="bossfill"></div></div></div>
   <div id="healthwrap"><div id="healthlabel">INTEGRITY</div><div id="healthbar"><div id="healthfill"></div></div></div>
@@ -610,7 +643,9 @@ const baseFogDensity = scene.fog.density;              // 0.018
 const baseAmbient = ambient.intensity;                 // 0.6
 const baseKeyColor = key.color.clone();                // 0x88ccff cool
 const MOOD_BOSS = new THREE.Color(0xff2848);           // menace red the key + fog pull toward
+const MOOD_OVERDRIVE = new THREE.Color(0xff2266);      // item 47: the hot magenta wave 20+ runs at
 const _moodMut = new THREE.Color();                    // temp for mutator hex, reused
+const _moodFogBase = new THREE.Color();                // item 47: fog base the boss/mutator branches rebuild from
 // ---------------------------------------------------------------------------
 // Sectors (item 51) — every 10 waves the arena's whole accent palette swaps, so a
 // deep run reads as travelling somewhere. Sectors sit UNDER the mood system: the
@@ -658,6 +693,21 @@ const SECTORS = [
     gridA: new THREE.Color(0xdcf2ff),  gridB: new THREE.Color(0x3d86ff),
     sky: new THREE.Color(0xcfe4ff) },
 ];
+// ---------------------------------------------------------------------------
+// OVERDRIVE (item 47) — past wave 20 the run shifts into an endgame gear: a ramping score
+// multiplier, rising elite rates, a slightly steeper hp/speed slope and a permanently
+// hotter arena. Like sectors, every term is a PURE FUNCTION of the wave number, so there
+// is no overdrive flag to set, drift or leak and resetGame has nothing to undo beyond the
+// HUD badge. odDepth ramps 0 -> 1 over the 15 waves after entry and is 0 AT wave 20
+// exactly, so every curve it feeds is continuous across the boundary: wave 20 announces
+// the gear change without a stat pop mid-fight, and the pressure builds from 21 on.
+// ---------------------------------------------------------------------------
+const OVERDRIVE_WAVE = 20;
+const odOn = n => n >= OVERDRIVE_WAVE;
+const odDepth = n => (n >= OVERDRIVE_WAVE ? Math.min(1, (n - OVERDRIVE_WAVE) / 15) : 0);
+// x1.5 on entry, +0.1 per wave after. Multiplies every score gain — kills AND style
+// bonuses — and stacks multiplicatively with a mutator's scoreMul, per spec.
+const odScoreMul = n => (n >= OVERDRIVE_WAVE ? 1.5 + (n - OVERDRIVE_WAVE) * 0.1 : 1);
 function makeMood() {
   return { pink: new THREE.Color(), cyan: new THREE.Color(), fog: new THREE.Color(),
            key: new THREE.Color(), fogDensity: 0, ambient: 0,
@@ -687,21 +737,50 @@ function computeMood(n, mut, out) {
   // over a warm floor. Sector 1 leans on pink, exactly as before.
   const fogAcc = S.fogTo === 'cyan' ? out.cyan : out.pink;
   out.fog.copy(S.fog).lerp(fogAcc, 0.07);
+  // Item 47 — the base the boss/mutator branches below rebuild fog from. It is S.fog
+  // exactly until OVERDRIVE tints it, so waves 1-19 render byte-identically to before.
+  _moodFogBase.copy(S.fog);
   // item 51 surfaces pass straight through — the boss/mutator branches below stay
   // lights-and-fog only, exactly as they were before sectors existed.
   out.trim.copy(S.trim); out.cap.copy(S.cap); out.wall.copy(S.wall); out.pillar.copy(S.pillar);
   out.gridA.copy(S.gridA); out.gridB.copy(S.gridB); out.sky.copy(S.sky);
+  // Item 47 — OVERDRIVE runs BEFORE the boss and mutator branches on purpose: both of
+  // those rewrite key and fog outright, so a mutator hard-shift still wins the arena
+  // exactly as it did before, while the overdrive heat persists through every other wave
+  // past 20. Fog is tinted on _moodFogBase as well as out.fog, so the copy() in those two
+  // branches inherits the heat instead of discarding it. Unlike them this also touches the
+  // sector surfaces — lights and fog alone did not read as a different place next to
+  // wave 19 — but only by a partial lerp, so the sector underneath stays recognisable.
+  const od = odDepth(n);
+  if (odOn(n)) {
+    const f = 0.16 + 0.10 * od;
+    out.fog.lerp(MOOD_OVERDRIVE, f);
+    _moodFogBase.lerp(MOOD_OVERDRIVE, f);
+    out.pink.lerp(MOOD_OVERDRIVE, 0.30 + 0.25 * od);
+    out.cyan.lerp(MOOD_OVERDRIVE, 0.20 + 0.22 * od);
+    out.key.lerp(MOOD_OVERDRIVE, 0.22 + 0.20 * od);
+    out.ambient *= 0.90 - 0.06 * od;                    // the arena dims as it heats up
+    out.fogDensity *= 1.10 + 0.12 * od;                 // ...and closes in
+    const sur = 0.30 + 0.18 * od;
+    out.trim.lerp(MOOD_OVERDRIVE, sur);
+    out.pillar.lerp(MOOD_OVERDRIVE, sur);
+    out.wall.lerp(MOOD_OVERDRIVE, sur * 0.5);           // quieter: walls are the largest surface
+    out.gridA.lerp(MOOD_OVERDRIVE, sur * 0.8);
+    out.gridB.lerp(MOOD_OVERDRIVE, sur * 0.8);
+    out.cap.lerp(MOOD_OVERDRIVE, sur * 0.7);
+    out.sky.lerp(MOOD_OVERDRIVE, sur * 0.6);
+  }
   if (n % 5 === 0) {                                    // boss wave: darker + menacing warm key
     out.ambient *= 0.8;
     out.key.lerp(MOOD_BOSS, 0.55);
-    out.fog.copy(S.fog).lerp(MOOD_BOSS, 0.12);
+    out.fog.copy(_moodFogBase).lerp(MOOD_BOSS, 0.12);
   }
   if (mut) {                                            // mutator wave: infect lights + fog with its color
     _moodMut.set(mut.color);
     out.pink.lerp(_moodMut, 0.6);
     out.cyan.lerp(_moodMut, 0.6);
     out.key.lerp(_moodMut, 0.4);
-    out.fog.copy(S.fog).lerp(_moodMut, 0.3);
+    out.fog.copy(_moodFogBase).lerp(_moodMut, 0.3);
   }
   return out;
 }
@@ -1131,6 +1210,13 @@ const sfx = {
   sector: () => { beep({ freq: 180, slideTo: 720, type: 'triangle', dur: 0.7, vol: 0.11 });
                   beep({ freq: 90, slideTo: 360, type: 'sine', dur: 0.9, vol: 0.13, delay: 0.05 });
                   beep({ freq: 1080, slideTo: 1440, type: 'sine', dur: 0.35, vol: 0.05, delay: 0.45 }); },
+  // OVERDRIVE entry sting (item 47): a rising magenta stab. Every part is delayed ~0.2 s
+  // because wave 20 is a boss wave — this has to land in the gap after bossIntro's sub-bass
+  // impact rather than smearing into it. No noiseBurst: that has no delay parameter, and
+  // the boss sting's own burst already owns that band.
+  overdrive: () => { beep({ freq: 82, slideTo: 165, type: 'sine', dur: 0.5, vol: 0.2, delay: 0.18 });
+                     beep({ freq: 330, slideTo: 990, type: 'square', dur: 0.28, vol: 0.13, delay: 0.2 });
+                     beep({ freq: 494, slideTo: 1480, type: 'triangle', dur: 0.34, vol: 0.11, delay: 0.26 }); },
   // Boss intro sting (item 49): sub-bass impact, then a rising glitch sweep that lands
   // under the title card. Every part is WebAudio-scheduled, so it needs no teardown.
   bossIntro: () => { beep({ freq: 110, slideTo: 34, type: 'sawtooth', dur: 0.45, vol: 0.26 });
@@ -1800,6 +1886,9 @@ const WHITE = new THREE.Color(0xffffff);
 // 25% damage reduction (crits ignore it) — unrelated to the BULWARK facing shield.
 const ELITE_TINT = { SWIFT: 0x00f0ff, VOLATILE: 0x8aff3a, SHIELDED: 0xff7a1a };
 const ELITE_KINDS = Object.keys(ELITE_TINT);
+// Item 47 — OVERDRIVE roughly doubles the elite rate on entry (8% -> 16%) and keeps
+// ramping to 24% by wave 35. Below wave 20 this returns the original flat 0.08.
+const eliteChance = w => (odOn(w) ? 0.16 + 0.08 * odDepth(w) : 0.08);
 function spawnEnemy(wave) {
   let x, z, tries = 0;
   do {
@@ -1816,7 +1905,7 @@ function spawnEnemy(wave) {
   const isSplitter = !forceT && !isShooter && !isExploder && !isWasp && !isBulwark && wave >= 4 && Math.random() < Math.min(0.22, 0.06 + wave * 0.02);
   const type = isShooter ? 'shooter' : isExploder ? 'exploder' : isWasp ? 'wasp' : isBulwark ? 'bulwark' : isSplitter ? 'splitter' : 'chaser';
   const hue = isShooter ? 0xb04bff : isExploder ? 0x8aff3a : isWasp ? 0x3af0ff : isBulwark ? 0xff7a1a : isSplitter ? 0x1fffc3 : (Math.random() < 0.5 ? 0xff2e88 : 0xff8f3a);
-  const elite = wave >= 3 && Math.random() < 0.08 ? ELITE_KINDS[Math.floor(Math.random() * ELITE_KINDS.length)] : null;
+  const elite = wave >= 3 && Math.random() < eliteChance(wave) ? ELITE_KINDS[Math.floor(Math.random() * ELITE_KINDS.length)] : null;
   const scale = elite ? 1.4 : 1;
   const tint = elite ? new THREE.Color(hue).lerp(new THREE.Color(ELITE_TINT[elite]), 0.6).getHex() : hue;
   const mat = new THREE.MeshStandardMaterial({ color: isBulwark ? 0x14090a : isSplitter ? 0x07140f : 0x1a0a16, emissive: tint, emissiveIntensity: 0.9,
@@ -1842,8 +1931,13 @@ function spawnEnemy(wave) {
   }
   scene.add(mesh);
 
-  const boost = 1 + wave * 0.06;
-  const hp = ((isShooter ? 40 : isExploder ? 30 : isWasp ? 35 : isBulwark ? 110 : isSplitter ? 70 : 50) + wave * (isExploder ? 8 : isWasp ? 8 : isBulwark ? 15 : 12)) * (elite ? 2.5 : 1) * (mut ? mut.hpMul || 1 : 1);
+  // Item 47 — OVERDRIVE adds a gentle extra slope on top of the linear per-wave scaling:
+  // +35% hp and +12% speed by wave 35, and exactly nothing at wave 20 itself. Speed gets
+  // the smaller share deliberately — chaser/exploder speed already outpaces sprint (13)
+  // well before wave 20, so most of the extra pressure belongs in hp, not in movement.
+  const od = odDepth(wave);
+  const boost = (1 + wave * 0.06) * (1 + 0.12 * od);
+  const hp = ((isShooter ? 40 : isExploder ? 30 : isWasp ? 35 : isBulwark ? 110 : isSplitter ? 70 : 50) + wave * (isExploder ? 8 : isWasp ? 8 : isBulwark ? 15 : 12)) * (elite ? 2.5 : 1) * (mut ? mut.hpMul || 1 : 1) * (1 + 0.35 * od);
   enemies.push({
     mesh, core, type, elite, baseScale: scale,
     hp, maxHp: hp,
@@ -1938,7 +2032,9 @@ function spawnBoss(wave) {
   mesh.add(core);
   mesh.add(new THREE.PointLight(hue, 1.4, 26));
   scene.add(mesh);
-  const hp = 900 + wave * 120;
+  // Item 47: the boss rides the same OVERDRIVE hp slope as everything else. Its speed
+  // does NOT — a boss that outruns sprint has no counterplay at all.
+  const hp = (900 + wave * 120) * (1 + 0.35 * odDepth(wave));
   enemies.push({
     mesh, core, type: 'boss', hp, maxHp: hp,
     speed: 3.2 + wave * 0.05, radius: 3.0, spin: 0.5, bob: 0,
@@ -2084,6 +2180,11 @@ function startWave(n) {
       flashTip(S.name, S.accent);
     }
   }
+  // Item 47 — crossing into OVERDRIVE. The banner announces it once, on wave 20; the badge
+  // is repainted on every wave because the multiplier keeps climbing. Both are safe to run
+  // before spawnBoss below: the banner is its own element and sits clear of the boss card.
+  if (n === OVERDRIVE_WAVE) { sfx.overdrive(); showOverdriveBanner(); }
+  updateOverdriveUI();
   if (n % 2 === 0) spawnRandomPickup('health');
   if (n % 5 === 0) { spawnBoss(n); spawnRandomPickup('ammo'); }
   setMood(n);   // item 28: drift arena lighting/fog toward this wave's mood (mutator already set above)
@@ -2119,8 +2220,34 @@ const ui = {
   bossCard: document.getElementById('bosscard'),
   bossCardName: document.querySelector('#bosscard .bc-name'),
   bossCardSub: document.querySelector('#bosscard .bc-sub'),
+  odMul: document.getElementById('odmul'),
+  odBanner: document.getElementById('odbanner'),
+  odSub: document.getElementById('od-sub'),
 };
 function updateScoreUI() { ui.score.textContent = state.score; }
+// Item 47 — OVERDRIVE HUD. The badge is persistent because the multiplier climbs every
+// wave; the banner is a one-shot announce with the same lifecycle as the boss title card,
+// including the hard cut for teardown so a restart cannot leave it glowing over wave 1.
+const OD_BANNER_T = 2.6;
+let odBannerTO;
+function updateOverdriveUI() {
+  const on = odOn(state.wave);
+  ui.odMul.classList.toggle('on', on);
+  if (on) ui.odMul.textContent = `\u26a1 \u00d7${odScoreMul(state.wave).toFixed(1)}`;
+}
+function showOverdriveBanner() {
+  ui.odSub.textContent = `SCORE \u00d7${odScoreMul(state.wave).toFixed(1)} \u00b7 ELITES RISING`;
+  // Reflow-restart so the glitch animation re-fires on a later run, not just the first.
+  ui.odBanner.classList.remove('show'); void ui.odBanner.offsetWidth; ui.odBanner.classList.add('show');
+  clearTimeout(odBannerTO);
+  odBannerTO = setTimeout(() => hideOverdriveBanner(false), OD_BANNER_T * 1000);
+}
+function hideOverdriveBanner(cut) {
+  clearTimeout(odBannerTO);
+  if (cut) ui.odBanner.style.transition = 'none';
+  ui.odBanner.classList.remove('show');
+  if (cut) { void ui.odBanner.offsetWidth; ui.odBanner.style.transition = ''; }
+}
 function updateUltUI() {
   ui.ultFill.style.width = state.ult + '%';
   ui.ultBar.classList.toggle('ready', state.ult >= 100);
@@ -2387,7 +2514,10 @@ function killEnemy(enemy, kw, kdist, src) {
   }
   if (mods.lifesteal > 0) { player.hp = Math.min(player.maxHp, player.hp + mods.lifesteal); updateHealthUI(); }
   if (mods.killClip) killClipRefund();
-  const gained = Math.round((isBoss ? 1000 : (enemy.scoreVal || 100)) * state.combo * (state.mutator ? state.mutator.scoreMul || 1 : 1)); state.score += gained;
+  // Item 47: OVERDRIVE's multiplier stacks multiplicatively with the mutator's scoreMul,
+  // so wave 21 under BERSERK pays combo x 2 x odScoreMul.
+  const odm = odScoreMul(state.wave);
+  const gained = Math.round((isBoss ? 1000 : (enemy.scoreVal || 100)) * state.combo * (state.mutator ? state.mutator.scoreMul || 1 : 1) * odm); state.score += gained;
   // Style bonuses — flat additions, only on direct player hits (kw is null for splash/chain).
   if (kw) {
     const styles = [];
@@ -2395,10 +2525,12 @@ function killEnemy(enemy, kw, kdist, src) {
     if (player.invuln > 0) styles.push(['PHASE KILL', 200]);
     if (kw.name === 'SHOTGUN' && kdist < 4) styles.push(['POINT BLANK', 100]);
     if (styles.length) {
-      let bonus = 0;
-      for (const s of styles) bonus += s[1];
+      // Item 47: a style bonus is a score gain too, so OVERDRIVE scales it — and the flash
+      // has to quote the scaled figure, or the HUD would under-report what was awarded.
+      let bonus = 0; const parts = [];
+      for (const s of styles) { const v = Math.round(s[1] * odm); bonus += v; parts.push(`${s[0]} +${v}`); }
       state.score += bonus; state.stats.style += bonus;
-      flashTip(styles.map(s => `${s[0]} +${s[1]}`).join('   '), '#ffe23a');
+      flashTip(parts.join('   '), '#ffe23a');
     }
   }
   updateScoreUI();
@@ -3786,6 +3918,9 @@ function resetGame() {
   // starts the new run zoomed with a stale title still on screen.
   bossIntroT = 0; camera.fov = settings.fov; camera.updateProjectionMatrix();
   hideBossCard(true);   // hard cut: no .45s ghost of the last run's boss over wave 1
+  // Item 47: drop the OVERDRIVE badge and hard-cut its banner. state.wave is already 0 by
+  // here, so updateOverdriveUI() is what clears the badge — no separate flag to unset.
+  hideOverdriveBanner(true); updateOverdriveUI();
   dmgDirs.forEach(d => d.style.opacity = 0);
   // Item 57: the wave readout is written ONLY by startWave(), which used to run a
   // beat after every resetGame — so nobody saw the stale value. BACK TO TITLE parks
@@ -3810,6 +3945,7 @@ function gameOver() {
   state.running = false; state.paused = false;
   state.mutator = null;   // death mid-mutator must not leak into the next run
   hideBossCard(true);     // dying mid-intro must not leave the card glowing behind the death card
+  hideOverdriveBanner(true);   // item 47: same, for an OVERDRIVE announce still on screen
   state.choosing = false; upgradeEl.classList.add('hidden');
   if (!isTouch) document.exitPointerLock();
   const st = state.stats;
