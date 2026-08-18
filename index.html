@@ -2343,18 +2343,22 @@ function spawnJaggedTracer(from, to) {
 function damageEnemy(enemy, dmg, point, crit, kw, kdist, src) {
   if (enemy.elite === 'SHIELDED' && !crit) dmg *= 0.75;   // flat 25% DR, crits ignore it
   if (state.mutator && state.mutator.dmgMul) dmg *= state.mutator.dmgMul;   // BERSERK: everything hits harder
-  if (src !== 'ENEMY') state.stats.dmgDealt += dmg;
+  // Enemy-sourced damage (exploder chains, enemy-vs-enemy blasts) is not the player's hit:
+  // it feeds neither the dmgDealt stat, the crosshair hitmark, nor the hit blip. The floating
+  // damage number IS kept — it reads as world-space info about the chain, not as player feedback.
+  const byPlayer = src !== 'ENEMY';
+  if (byPlayer) state.stats.dmgDealt += dmg;
   enemy.hp -= dmg; enemy.damageTimer = 0.12;
   // Boss phase 2 at < 50% hp. phase flips inside bossEnrage, so this can never
   // double-trigger; an overkill hit (hp <= 0) skips straight to killEnemy.
   if (enemy.type === 'boss' && enemy.phase === 1 && enemy.hp > 0 && enemy.hp < enemy.maxHp / 2) bossEnrage(enemy);
   spawnDamageNumber(point || enemy.mesh.position, dmg, crit);
-  showHitmark(crit);
-  if (crit) {
+  if (byPlayer) showHitmark(crit);
+  if (crit) {   // unreachable for src === 'ENEMY': every enemy-source call site passes crit = false
     sfx.crit(); state.stats.crits++; if (point) burst(point, 0xffe23a, 10, 14);
     if (mods.chainCrit) chainLightning(enemy, point || enemy.mesh.position.clone());
   }
-  else sfx.hit();
+  else if (byPlayer) sfx.hit();
   if (point) burst(point, enemy.color, 6, 10);
   if (enemy.hp <= 0) killEnemy(enemy, kw, kdist, src);
 }
@@ -3216,9 +3220,13 @@ function drawMinimap() {
     mctx.fillStyle = e.type === 'boss' ? '#ffe23a' : e.type === 'shooter' ? '#b04bff' : e.type === 'exploder' ? '#8aff3a' : e.type === 'wasp' ? '#3af0ff' : e.type === 'bulwark' ? '#ff7a1a' : e.type === 'splitter' || e.mini ? '#1fffc3' : '#ff2e88';
     mctx.beginPath(); mctx.arc(px, pz, (e.type === 'boss' ? 5 : e.type === 'bulwark' ? 3.4 : e.type === 'splitter' ? 3.2 : e.mini ? 1.8 : 2.6) * (e.elite ? 1.4 : 1), 0, 7); mctx.fill();
   }
-  // player triangle (facing -yaw)
+  // Player triangle. The tip is drawn at local (0,-6); canvas rotate(θ) sends it to
+  // (6 sinθ, -6 cosθ), and w2m maps world +x → map right, +z → map down. True forward is
+  // (-sin yaw, -cos yaw) (see update(dt) and the camera.lookAt basis), so θ = -yaw. The old
+  // `yaw + Math.PI` only matched the x component and mirrored the triangle in Z, so it
+  // pointed behind the player — invisible at yaw ±π/2, wrong by 180° at yaw 0 and π.
   const [px, pz] = w2m(player.pos.x, player.pos.z);
-  const ang = player.yaw + Math.PI; // facing dir on map
+  const ang = -player.yaw; // facing dir on map
   mctx.save(); mctx.translate(px, pz); mctx.rotate(ang);
   mctx.fillStyle = '#00f0ff'; mctx.beginPath();
   mctx.moveTo(0, -6); mctx.lineTo(4, 5); mctx.lineTo(-4, 5); mctx.closePath(); mctx.fill();
@@ -3769,6 +3777,11 @@ function resetGame() {
   // Item 27 overlays — clear speed lines, enrage glitch, and any lingering damage arcs.
   document.body.classList.remove('slowmo'); slowmoOn = false;
   canvas.classList.remove('enrage'); clearTimeout(enrageTO);
+  // ...and the hit flash, which this list forgot: a reset taken inside its .4s fade
+  // carried a pink overlay into the new run's first frames. Kill the transition too, or
+  // the clear itself animates. A damageFlash() rAF still in flight is harmless — it only
+  // ever sets opacity back to 0.
+  ui.flash.style.transition = 'none'; ui.flash.style.opacity = 0;
   // Item 49 boss intro — kill the card and un-punch the camera, or a restart mid-intro
   // starts the new run zoomed with a stale title still on screen.
   bossIntroT = 0; camera.fov = settings.fov; camera.updateProjectionMatrix();
