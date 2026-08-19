@@ -69,6 +69,12 @@ Three things the game itself had to learn, all in `probe` near the input handler
 
 `node tools/playtest/run.mjs --help` prints the full list.
 
+One caution on `--keep-profile`: the profile is wiped by default, so `playerName` is
+never set and the death screen takes the first-timer path, which POSTs nothing. Keep a
+profile in which you once typed a name and a returning player auto-submits on death — so
+`--keep-profile` together with `--url` pointed at the live site would put bot runs on the
+real leaderboard. Don't combine those two.
+
 ## Files
 
     run.mjs            CLI, Chrome/CDP setup, error collection, report
