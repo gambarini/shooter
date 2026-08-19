@@ -17,6 +17,19 @@ Items 49/50/51 each built a rig like this from scratch in a temp dir and threw i
 item 54 lost its FPS verification entirely for want of one. The hard-won parts are
 checked in here so the next session extends them instead of rediscovering them.
 
+**Extend this rig; never hand-roll a script beside it.** That is the single most-repeated
+mistake in this repo's history, and it survived the rig landing: item 41 started down the
+same path a fourth time and was only caught by the user asking "is the game play test
+using the playtest?". If the harness cannot check what your item needs, the answer is a
+field in `SNAPSHOT` or a file in `scenarios/` — see "To add a check" below.
+
+A hand-rolled script is also how you get a *false* perf regression. `launch()` in
+`chrome.mjs` returns `close()`, not `kill()`, so a wrong cleanup call silently leaves
+~8 Chrome processes alive per run, and the GPU contention halves the next FPS sample.
+Before believing any FPS number:
+
+    pgrep -f 'playtest/.chrome-profile' | wc -l   # 0 between runs
+
 ## What it checks
 
 | Check | Catches |
