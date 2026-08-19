@@ -1,6 +1,6 @@
 ---
 name: roadmap-item
-description: Run one NEON STRIKE roadmap item end to end — pick and claim it in Notion, implement it in index.html, verify in the browser, then commit, tag and close out in Notion. Runs solo by default; pass "fanout" to add read-only recon and review agent fan-outs. Use when asked to "do the next roadmap item", "work the roadmap", "do item N", or to chain items with /loop.
+description: Run one NEON STRIKE roadmap item end to end — pick and claim it in Notion, implement it in index.html, verify with `make playtest` plus a human play, then commit, tag and close out in Notion. Runs solo by default; pass "fanout" to add read-only recon and review agent fan-outs. Use when asked to "do the next roadmap item", "work the roadmap", "do item N", or to chain items with /loop.
 ---
 
 # Work one roadmap item
@@ -57,8 +57,9 @@ Three rules that fall out of this and must not be relaxed, in any mode:
   may be missing inside subagents or headless runs. You fetch the spec and pass it into the
   workflows via `args`; you own every `wip` / `done` / Commit-hash / Session-Log write. This
   also removes any risk of two agents racing on an item's Status.
-- **Only the main session drives the browser.** One Chrome, one port, and the HQ recipe needs
-  a visible unoccluded window for `requestAnimationFrame` to run at real speed.
+- **Only the main session runs `make playtest`.** The harness owns a dedicated Chrome and a
+  port; two of them racing gives you contention, not coverage — and stray Chrome processes
+  from an earlier run are enough to fake a frame-time regression (see step 5).
 
 ## Steps
 
@@ -122,7 +123,7 @@ Non-negotiables while editing (full list in the HQ conventions):
 - SFX via `sfx.beep()` / `sfx.noiseBurst()` — never audio files.
 - Any new key or ability gets a `#touch` counterpart, or an explicit keyboard-only note.
 
-If the item touches `lib/` or `functions/`, run `make test` — it is the deploy gate.
+Verification is step 5, and it starts with `make playtest` — not a hand-driven browser.
 
 ### 4. Review the diff
 
@@ -143,27 +144,61 @@ Workflow({ scriptPath: ".claude/workflows/roadmap-review.mjs",
 Fix every `blocker` and `should-fix` in `confirmed`. Judge the nits. Keep `playtestFocus` —
 it is the list step 5 must cover.
 
-### 5. Playtest — you, in the browser, in every mode
+### 5. Verify
 
-Follow the HQ page's **Verification recipe**; the parts most often skipped:
+Two halves. Run the first, then do the second — neither substitutes for the other.
 
-- Serve over http (`make serve`, or `make dev` when the change touches `functions/` or `lib/`)
-  — not `file://`.
-- Keep the automation Chrome window **visible and unoccluded** for the whole play phase.
-  Chrome throttles `rAF` on occluded windows, which silently invalidates every FPS number.
-  If the game seems frozen, check `document.visibilityState` before blaming the code.
-- Drive with an injected in-page autoplay bot — synthetic mouse events never get pointer lock.
-  Make the bot **cycle all three weapons**, and watch the FPS counter (Settings → SHOW FPS)
-  during shotgun spam specifically.
-- Minimum loop, always: start a run → 3+ waves → die or restart → 1+ more wave. Fresh run
-  **and** restart; most state-leak bugs only appear on the second run.
-- `read_console_messages` for errors at boot and after the run; confirm `window.__neonReady === true`.
+#### The automated half — `make playtest`
+
+```
+make playtest
+```
+
+That is the command. Since item 58 the rig is checked in at `tools/playtest/`: it starts
+its own static server and its own dedicated Chrome, injects its own autoplay bot, cycles
+all three weapons, plays several waves, dies, restarts, plays another, and fails the run
+on leaked per-run state (**reported by field name**), leaked GPU resources, a dropped
+pooled object, point lights over budget, a console error, or a frame-time regression
+against the machine-local baseline. `tools/playtest/README.md` is the reference.
+
+Everything the old prose recipe in this step used to ask you to do by hand — serving over
+http, keeping a Chrome window unoccluded, injecting a bot, cycling weapons, watching the
+HUD FPS counter during shotgun spam, reading the console for errors, checking
+`window.__neonReady` — is inside that command now. Do not redo any of it by hand.
+
+**If the harness cannot check something your item needs, add a scenario — never a
+throwaway script.** A file in `scenarios/` exporting `async (ctx) => {}` plus a line in
+`SCENARIOS` in `run.mjs`; or, for a new invariant, a field in `SNAPSHOT` in `probes.mjs`.
+Item 41's `scenarios/medals.mjs` is the worked example, including the two moves a
+persistence check needs: seeding save state through `__probe`, and `ctx.reload()`.
+This is the single most-repeated mistake in this repo's history — items 49, 50 and 51 each
+built a rig in a temp dir and threw it away, item 58 existed to end that, and item 41 still
+started down the same path. A hand-rolled script is also how you get a *false* perf
+regression: `launch()` in `chrome.mjs` returns `close()`, not `kill()`, so a wrong cleanup
+call silently leaves ~8 Chrome processes alive per run and the GPU contention halves the
+next FPS sample. Check `pgrep -f 'playtest/.chrome-profile' | wc -l` before believing any
+FPS number.
+
+Run `make test` too if the item touched `lib/` or `functions/` — it is the deploy gate.
+
+#### The human half — still required
+
+`make playtest` passing is not "verified". It runs with the pause handlers disabled
+(`probe.driven`) and it cannot judge anything aesthetic.
+
+- **Play it**: start a run → 3+ waves → die or restart → 1+ more wave. Fresh run **and**
+  restart; most state-leak bugs only appear on the second run.
+- **Feel is not automatable.** Recoil weight, audio pitch, bloom intensity, readability,
+  whether a warning gives fair reaction time — automation confirms presence, never
+  intensity. These always get a user playtest as the final word.
+- **Pause paths are automation-blind**: Esc mid-fight, alt-tab, click-to-relock, firing
+  that needs a real pointer lock.
+- **Verify visuals with screenshots**, several compass directions for world-scale changes.
 - Exercise every "Done when" criterion, plus whatever step 4 could not settle statically.
 
-**Feel is not automatable.** Recoil weight, audio pitch, bloom intensity, whether a warning
-gives fair reaction time — automation confirms presence, never intensity. Write the spot-check
-list into the Session Log entry's **`Spot-checks owed`** property — not only the prose body —
-so the user knows exactly what to try in two minutes and a later session can find it.
+Write everything you could not check into the Session Log entry's **`Spot-checks owed`**
+property — not only the prose body — so the user knows exactly what to try in two minutes
+and a later session can find it.
 
 ### 6. Close out — every mode
 
