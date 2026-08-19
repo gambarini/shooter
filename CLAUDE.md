@@ -22,8 +22,8 @@ gate, so it must stay green.
   read `tools/playtest/README.md` before extending it.
 - Minimum verification after any change: `make playtest`, THEN play it yourself — start a
   run, play 3+ waves, die or restart once, play 1 more wave. The harness cannot judge
-  feel, audio, bloom intensity or readability, and the Session Log should say what it
-  could not judge.
+  feel, audio, bloom intensity or readability, and the Session Log entry's
+  `Spot-checks owed` property must list what it could not judge.
 - Test both a fresh run AND a restart — most state-leak bugs only show on the second run.
 
 ## Deploy
@@ -58,7 +58,9 @@ Each session does exactly ONE item:
 3. **Read first**: the "Codebase conventions" section of the HQ page, the item's row page
    (spec), and the functions named in its "Hook points" before writing any code.
 4. **Implement**: stay within the item's scope. If you discover a bug or an improvement
-   outside scope, note it in the Session Log entry instead of fixing it now.
+   outside scope, don't fix it now — write it down, and file it as its own Roadmap row at
+   close-out (step 6). Noting it only in Session Log prose is not enough: that queue is
+   write-only and nothing ever reads it back.
 5. **Verify**: run the game, exercise every "Done when" criterion of the item, plus the
    minimum verification above.
 6. **Close out**:
@@ -71,6 +73,17 @@ Each session does exactly ONE item:
      GitHub commit link — don't write to it.)
    - Create a Session Log entry in Notion (format on the HQ page): what landed, tuning
      values chosen, anything the next session should know.
+   - **Drain both queues — the session is not closed until they are empty:**
+     - Every out-of-scope finding from step 4 becomes a new `todo` row in the Roadmap
+       database, in this same session. Title, `Goal` and a one-line spec is enough — the
+       point is that it exists, not that it is fully specced. Small related fixes may
+       share one "bug sweep" row rather than one row each. If you decide not to file
+       something, the Session Log entry must say "declined, because …". Silence is not an
+       option.
+     - Every check automation could not make goes in the Session Log entry's
+       `Spot-checks owed` property, not only in the prose body. A later session that makes
+       the check writes the verdict into that property or clears it; if the list is big
+       enough to need setup, file it as its own Roadmap row instead (see item 62).
 
 One item = one commit. Don't batch items; the point is each change is playable and
 revertable on its own.

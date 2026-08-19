@@ -109,8 +109,9 @@ Session Log.
 ### 3. Edit — you, alone, in every mode
 
 Apply the plan with Edit against `index.html`. Stay inside the item's scope: a bug or
-improvement you spot outside it goes in the Session Log's "Notes for next sessions", not in
-this diff.
+improvement you spot outside it does not go in this diff — write it down and file it as its
+own `todo` Roadmap row at close-out (step 6). Session Log prose alone is not enough; that
+queue is write-only and nothing reads it back.
 
 Non-negotiables while editing (full list in the HQ conventions):
 
@@ -161,7 +162,8 @@ Follow the HQ page's **Verification recipe**; the parts most often skipped:
 
 **Feel is not automatable.** Recoil weight, audio pitch, bloom intensity, whether a warning
 gives fair reaction time — automation confirms presence, never intensity. Write the spot-check
-list into the Session Log so the user knows exactly what to try in two minutes.
+list into the Session Log entry's **`Spot-checks owed`** property — not only the prose body —
+so the user knows exactly what to try in two minutes and a later session can find it.
 
 ### 6. Close out — every mode
 
@@ -174,9 +176,20 @@ In this order:
    `Commit` column is a read-only formula that renders the link — never write to it.
 4. Create a Session Log entry in data source `collection://8d944ded-d820-4bde-9cdd-e9b83c5349b6`.
    Properties: `Entry` (title, `Item N: <name>`), `Date`, `Item #`, `Outcome`
-   (`done` | `partial` | `abandoned`). Body: **What landed** / **Tuning chosen** /
-   **Notes for next sessions** — including what automation could not verify. Say which mode
-   the item was done in, so the log stays comparable across sessions.
+   (`done` | `partial` | `abandoned`), `Spot-checks owed`. Body: **What landed** /
+   **Tuning chosen** / **Notes for next sessions** — including what automation could not
+   verify. Say which mode the item was done in, so the log stays comparable across sessions.
+5. **Drain both queues.** Close-out is not finished until they are empty:
+   - Each out-of-scope finding from step 3 becomes a new `todo` row in the Roadmap data
+     source `collection://2bab5b91-2cad-44b1-8aa3-2f820594f0c4`, now, in this session.
+     Title, `Goal` and a one-line spec is enough — the point is that the row exists, not
+     that it is fully specced. Small related fixes may share one "bug sweep" row rather
+     than one row each. Declining to file is allowed; declining *silently* is not — the
+     Session Log entry says "declined, because …".
+   - Each owed spot-check goes in the `Spot-checks owed` property, not only in prose. A
+     later session that makes the check writes the verdict there or clears it; if the list
+     needs deliberate setup, file it as its own Roadmap row instead (item 62 is the
+     worked example).
 
 If you stop mid-item, leave Status `wip` and say in the Session Log exactly what remains and
 where the work stopped.
@@ -188,7 +201,8 @@ Two real limits, so say them out loud rather than letting an unattended run impl
 delivered:
 
 - Feel-verification needs a human, so a chained run produces items that are code-complete but
-  not feel-verified. Every Session Log entry must carry its spot-check list.
+  not feel-verified. Every Session Log entry must carry its list in `Spot-checks owed`, so the
+  debt is queryable after the chain ends rather than buried in prose.
 - Commits are signed through 1Password. When the vault locks, `git commit` fails with
   "failed to fill whole buffer" and the chain stops there — ask the user to unlock and commit
   with `! git commit ...`. That caps how many items chain unattended.
