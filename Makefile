@@ -1,4 +1,4 @@
-.PHONY: serve dev schema test
+.PHONY: serve dev schema test playtest
 
 # Static-only server: fastest way to play the game, but it has NO functions
 # runtime, so /api/scores 404s and the leaderboard shows "OFFLINE". Use `make dev`
@@ -35,3 +35,20 @@ schema:
 # purpose: `node --test <dir>` exits 0 when it finds nothing.
 test:
 	@node --test lib/leaderboard-core.test.mjs
+
+# Unattended browser playtest (roadmap item 58) — the automated half of the
+# verification recipe. Starts its own static server and its own dedicated Chrome,
+# plays several waves, dies, restarts, plays another, and asserts the things a human
+# watching the screen cannot see: that a restart begins byte-identical to a fresh
+# run, that no pooled object was dropped, that the point-light budget held, and what
+# the frame times looked like under shotgun spam.
+#
+# It does NOT replace the playtest — feel, audio, bloom intensity and anything
+# aesthetic still need a human. It replaces the part that was being skipped.
+#
+#   make playtest                        the default soak + perf run
+#   make playtest ARGS="--keep-open"     leave Chrome up to poke at a failure
+#   make playtest ARGS="--seed 7"        a different but still reproducible run
+#   make playtest ARGS="--url https://neon-strike-7b6.pages.dev/"   smoke the live site
+playtest:
+	@node tools/playtest/run.mjs $(ARGS)

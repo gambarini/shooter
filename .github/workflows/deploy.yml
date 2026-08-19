@@ -29,6 +29,11 @@ on:
       - 'README.md'
       - 'Makefile'
       - '.gitignore'
+      # The playtest harness (item 58) is dev-only: `dist/` is staged by hand below
+      # from index.html + _headers, so nothing under tools/ can reach the live site
+      # even if this entry were missing. It is here so a harness-only change does not
+      # spend a deploy.
+      - 'tools/**'
 
 permissions:
   contents: read

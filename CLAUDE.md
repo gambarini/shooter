@@ -2,8 +2,9 @@
 
 Single-file 3D arena wave shooter. All code lives in `index.html` (CSS → HUD markup → one
 `<script type="module">` using three.js from the unpkg CDN). No build step and no runtime
-dependencies. The GAME has no tests — verification is playtesting in a browser. The only
-tested code is the leaderboard backend's pure core (`lib/leaderboard-core.mjs`), covered by
+dependencies. The game has no unit tests — it is verified by `make playtest` (automated
+browser run, item 58) plus playing it. The only unit-tested code is the leaderboard
+backend's pure core (`lib/leaderboard-core.mjs`), covered by
 `lib/leaderboard-core.test.mjs` under plain `node --test`; the deploy workflow runs it as a
 gate, so it must stay green.
 
@@ -14,8 +15,15 @@ gate, so it must stay green.
 - `make dev` → http://localhost:8788 — the full stack, including the leaderboard Function
   against a real local D1. Use this whenever a change touches `functions/` or `lib/`.
 - `make test` → the leaderboard core's unit tests (the same command CI gates deploys on).
-- Minimum verification after any change: start a run, play 3+ waves, die or restart once,
-  play 1 more wave. Watch the FPS counter (Settings → SHOW FPS) during shotgun spam.
+- `make playtest` → the unattended browser playtest (`tools/playtest/`, item 58). ~45s:
+  dedicated Chrome, several waves, two death/restart cycles, and it fails on leaked
+  per-run state, leaked GPU resources, dropped pooled objects, point lights over budget,
+  console errors, or a frame-time regression. Run it after any change to `index.html`;
+  read `tools/playtest/README.md` before extending it.
+- Minimum verification after any change: `make playtest`, THEN play it yourself — start a
+  run, play 3+ waves, die or restart once, play 1 more wave. The harness cannot judge
+  feel, audio, bloom intensity or readability, and the Session Log should say what it
+  could not judge.
 - Test both a fresh run AND a restart — most state-leak bugs only show on the second run.
 
 ## Deploy

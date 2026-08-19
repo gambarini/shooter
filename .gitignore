@@ -6,3 +6,9 @@ dist/
 # `wrangler pages dev` keeps the local D1 SQLite database under .wrangler/state —
 # real data, machine-local, never committed. Delete it to reset the local board.
 .wrangler/
+
+# Roadmap item 58's playtest harness: the dedicated Chrome profile it launches, and
+# the reports/screenshots/perf baseline it writes. The baseline is machine-local on
+# purpose — an FPS number from one machine is not a threshold for another.
+tools/playtest/.chrome-profile/
+.playtest/

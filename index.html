@@ -1245,6 +1245,14 @@ const player = {
 const isTouch = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (isTouch) document.body.classList.add('touch');
 
+// Item 58 — the automated playtest harness (tools/playtest/) drives the game through
+// this object; its full surface is published as `window.__probe` at the end of the
+// module. It is declared HERE because the input handlers and animate() below read it.
+// `driven` means "an automated driver holds the controls": firing stops requiring
+// pointer lock (synthetic play never gets it) and the blur/visibility/unlock auto-pauses
+// stand down, since an unattended run must not pause itself into a hang.
+const probe = { turbo: 1, driven: false };
+
 const keys = {};
 let pointerLocked = false;
 let mouseDown = false;
@@ -1272,8 +1280,8 @@ document.addEventListener('keydown', e => {
   if (e.code === 'Escape' && state.running && !state.paused) pauseGame();
   if (e.code === 'Space') e.preventDefault();
 });
-window.addEventListener('blur', () => { if (state.running && !state.paused && !state.choosing) pauseGame(); });
-document.addEventListener('visibilitychange', () => { if (document.hidden && state.running && !state.paused && !state.choosing) pauseGame(); });
+window.addEventListener('blur', () => { if (!probe.driven && state.running && !state.paused && !state.choosing) pauseGame(); });
+document.addEventListener('visibilitychange', () => { if (!probe.driven && document.hidden && state.running && !state.paused && !state.choosing) pauseGame(); });
 document.addEventListener('keyup', e => { keys[e.code] = false; });
 canvas.addEventListener('mousedown', () => { mouseDown = true; });
 document.addEventListener('mouseup', () => { mouseDown = false; });
@@ -1285,7 +1293,7 @@ document.addEventListener('pointerlockchange', () => {
   pointerLocked = document.pointerLockElement === canvas;
   // Losing the lock mid-fight (Esc, alt-tab) pauses instead of leaving you defenceless.
   // While choosing an upgrade the lock is released on purpose — don't pause then.
-  if (!pointerLocked && state.running && !state.paused && !state.choosing && !isTouch) pauseGame();
+  if (!probe.driven && !pointerLocked && state.running && !state.paused && !state.choosing && !isTouch) pauseGame();
 });
 document.addEventListener('pointerlockerror', () => {
   if (state.running && !isTouch) flashTip('CLICK TO LOCK MOUSE', '#ffd27a');
@@ -2882,7 +2890,7 @@ function update(dt) {
   if (reloading) { reloadTimer -= dt; if (reloadTimer <= 0) finishReload(); }
 
   // ----- firing -----
-  const wantFire = isTouch ? touchFire : (mouseDown && pointerLocked);
+  const wantFire = isTouch ? touchFire : (mouseDown && (pointerLocked || probe.driven));
   if (wantFire) fireWeapon();
 
   // ----- enemies -----
@@ -3491,7 +3499,13 @@ function animate() {
     if (bossIntroT <= 0) { bossIntroT = 0; camera.fov = settings.fov; }
     camera.updateProjectionMatrix();
   }
-  if (state.running && !state.paused && !state.choosing) update(dt);
+  // Item 58 — `probe.turbo` sub-steps the sim so an automated playtest covers a wave in
+  // seconds instead of a minute. It is 1 for every real player, so the loop costs one
+  // extra comparison per frame. The gate is re-tested each step on purpose: an upgrade
+  // screen opened by step 1 must not be simulated straight through by step 2.
+  if (state.running && !state.paused && !state.choosing) {
+    for (let i = 0; i < probe.turbo && state.running && !state.paused && !state.choosing; i++) update(dt);
+  }
   updateEnv(raw);   // item 31: arena idles alive regardless of pause/choosing state
   updateAttract(raw);   // item 54: title-screen panel rotation (no-ops during a run)
   if (settings.bloom) composer.render(); else renderer.render(scene, camera);
@@ -4017,6 +4031,52 @@ window.addEventListener('resize', () => {
   composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   composer.setSize(window.innerWidth, window.innerHeight);
 });
+
+// ===========================================================================
+// Test API (roadmap item 58)
+// ===========================================================================
+// The ONE supported automation surface. `tools/playtest/` reads nothing else — no
+// scene-graph fingerprinting, no guessing which mesh is an enemy — so when an item
+// renames an internal, the harness breaks HERE, loudly, in a single place.
+//
+// Keep it in sync when internals move, and prefer adding to it over teaching the
+// harness a heuristic. Anything reassigned (`mods`, `currentWeapon`) is exposed as a
+// getter, or the harness would hold a stale reference across a resetGame().
+//
+// It ships in the deployed bundle on purpose: that is what lets the harness smoke-test
+// the live site (`node tools/playtest/run.mjs --url https://neon-strike-7b6.pages.dev/`).
+// It exposes no capability a devtools console lacks — the game is client-authoritative
+// either way, and the leaderboard's anti-abuse lives server-side (item 39).
+window.__probe = {
+  version: 1,
+  // --- driver flags (see the `probe` declaration up top) ---
+  get turbo()    { return probe.turbo; },
+  set turbo(v)   { probe.turbo = Math.max(1, Math.min(8, v | 0)); },
+  get driven()   { return probe.driven; },
+  set driven(v)  { probe.driven = !!v; },
+  // --- live game objects ---
+  state, player, scene, renderer, camera, settings, weapons, enemies,
+  get mods()          { return mods; },
+  get currentWeapon() { return currentWeapon; },
+  get reloading()     { return reloading; },
+  // --- pooled entities: every live list and its free list, for the leak probes ---
+  live:  { enemies, particles, tracers, dmgNumbers, shockRings, flashes, gibs,
+           trailSegs, waspTrail, rockets, enemyShots, pickups },
+  pools: { particlePool, tracerPool, dmgNumberPool, shockRingPool, flashPool, gibPool,
+           trailSegPool, waspTrailPool, rocketPool, enemyShotPool },
+  // --- control ---
+  fn: { startGame, resetGame, gameOver, startWave, pickUpgrade, rerollUpgrades,
+        selectWeapon, reload, togglePause, damagePlayer, returnToTitle },
+  setKey:  (code, down) => { keys[code] = !!down; },
+  setFire: (v) => { mouseDown = !!v; },
+  // Aim straight at a world point. Matches the forward vector animate() builds from
+  // yaw/pitch: (-sin(yaw)cos(pitch), sin(pitch), -cos(yaw)cos(pitch)).
+  lookAt: (x, y, z) => {
+    const dx = x - player.pos.x, dy = y - player.pos.y, dz = z - player.pos.z;
+    player.yaw = Math.atan2(-dx, -dz);
+    player.pitch = Math.atan2(dy, Math.hypot(dx, dz));
+  },
+};
 
 // Engine booted — cancel the CDN-failure watchdog.
 window.__neonReady = true;
