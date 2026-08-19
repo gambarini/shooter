@@ -29,6 +29,7 @@ checked in here so the next session extends them instead of rediscovering them.
 | idle-DOM snapshot | CSS-only leaks like item 56's damage flash |
 | console / exceptions / failed requests | anything the page logged, including CSP violations |
 | frame times under shotgun spam | jank, stalls, and FPS/draw-call regression vs a local baseline |
+| **medal award / persistence** | a medal that re-toasts, does not persist, or a recap grid that mislabels earned vs unearned |
 
 The state diff is the one worth understanding: two snapshots are taken **in the same
 JavaScript turn as the button click that starts a run**, so both are exactly "t = 0 of a
@@ -62,7 +63,7 @@ Three things the game itself had to learn, all in `probe` near the input handler
     make playtest ARGS="--keep-open"          leave Chrome up to poke at a failure
     make playtest ARGS="--seed 7"             a different, still reproducible run
     make playtest ARGS="--waves 6 --turbo 8"  a longer soak
-    make playtest ARGS="--scenario perf"      one scenario
+    make playtest ARGS="--scenario perf"      one scenario (default: soak,perf,medals)
     make playtest ARGS="--save-baseline"      record this machine's perf numbers
     make playtest ARGS="--headless"           SwiftShader: logic and leaks only, FPS meaningless
     make playtest ARGS="--url https://neon-strike-7b6.pages.dev/"   smoke the live site
@@ -85,10 +86,19 @@ real leaderboard. Don't combine those two.
     probes.mjs         probe expressions + the assertions over them
     scenarios/soak.mjs the play/die/restart loop and the leak comparisons
     scenarios/perf.mjs the frame-time sample under shotgun spam
+    scenarios/medals.mjs medal awards, the toast queue and the recap grid (item 41)
 
 To add a check, add a field to `SNAPSHOT` in `probes.mjs` and assert on it — that is the
 cheap path, and it is cheap on purpose. A new scenario is a file in `scenarios/`
 exporting a default `async (ctx) => {}` and a line in `SCENARIOS` in `run.mjs`.
+
+`medals` shows the two moves a scenario about *persistence* needs. It **seeds** the
+`neonstrike.medals` blob through `__probe.medals` so thresholds a 45-second run can never
+reach (1,000 lifetime kills, 10 finished runs) are one event away — without that they
+would ship unverified. And it calls **`ctx.reload()`**, which reboots the page and
+re-injects the bot, because "survives a reload" cannot be faked in-page. It runs last for
+both reasons: it rewrites localStorage and it reloads, so it must not perturb the leak
+diffs or the frame-time sample.
 
 ## Dev-only
 

@@ -140,6 +140,19 @@
                    border:1px solid rgba(0,240,255,.35); color:#9fe9ff; background:rgba(0,18,30,.9); }
   #overUps .chip.rare { border-color:rgba(190,110,255,.5); color:#be6eff; text-shadow:0 0 6px rgba(190,110,255,.5); }
   #overUps .chip.epic { border-color:rgba(255,200,60,.55); color:#ffc83c; text-shadow:0 0 6px rgba(255,200,60,.5); }
+  /* Item 41 — death-recap medal grid. Earned reads as a lit neon stamp; unearned stays a
+     dim outline and shows its hint instead, so the grid doubles as the "what's left" list. */
+  #overMedals { display:grid; grid-template-columns:repeat(auto-fit,minmax(92px,1fr));
+                gap:8px; max-width:520px; margin:0 auto 16px; }
+  #overMedals .medal { border:1px solid rgba(120,150,200,.22); border-radius:10px; padding:8px 5px; text-align:center; }
+  #overMedals .medal .mi { display:block; font-size:18px; line-height:20px; color:#6f93a6; opacity:.5; }
+  #overMedals .medal b { display:block; font-size:9px; letter-spacing:1.5px; margin-top:3px; color:#7f97a8; }
+  #overMedals .medal i { display:block; font-style:normal; font-size:8px; letter-spacing:.5px;
+                         margin-top:3px; line-height:1.35; color:#4c6373; }
+  #overMedals .medal.got { border-color:rgba(255,226,58,.5); background:rgba(255,226,58,.07); }
+  #overMedals .medal.got .mi { opacity:1; color:#ffe23a; text-shadow:0 0 14px #ffae3a; }
+  #overMedals .medal.got b { color:#fff; text-shadow:0 0 10px #ffe23a; }
+  #overMedals .medal.got i { color:#ffd27a; }
 
   /* Minimap */
   #minimap { position:absolute; top:80px; right:28px; width:160px; height:160px;
@@ -295,6 +308,26 @@
     100% { transform:none; }
   }
 
+  /* Item 41 — medal unlock toast. Lives OUTSIDE #hud (a z-index:5 stacking context, so a
+     child could never escape it) as a sibling at z-index 9, later in the DOM than
+     #upgrade: UNTOUCHABLE is awarded by nextWaveCheck on the very frame showUpgrades()
+     runs, and a toast buried behind the wave-clear overlay would expire unseen. Still
+     below #overlay (10), so the death card covers it — gameOver hard-cuts it anyway. */
+  #medaltoast { position:fixed; z-index:9; top:130px; left:28px; width:min(268px,72vw);
+                pointer-events:none; padding:10px 14px; border-radius:10px;
+                background:linear-gradient(90deg, rgba(255,226,58,.16), rgba(255,226,58,0));
+                border:1px solid rgba(255,226,58,.4); border-left:3px solid #ffe23a;
+                visibility:hidden; opacity:0; transform:translateX(-18px);
+                transition:opacity .35s ease-out, transform .35s ease-out, visibility 0s linear .35s; }
+  #medaltoast.show { visibility:visible; opacity:1; transform:none;
+                     transition:opacity .18s ease-out, transform .18s cubic-bezier(.2,1.4,.4,1), visibility 0s; }
+  #mt-label { font-size:9px; letter-spacing:4px; font-weight:800; color:#ffd27a; text-shadow:0 0 8px #ffae3a; }
+  #mt-name { margin-top:3px; font-size:17px; font-weight:900; letter-spacing:2px; color:#fff;
+             text-shadow:0 0 16px #ffe23a, 0 0 30px rgba(255,174,58,.55); }
+  #mt-hint { margin-top:2px; font-size:10px; letter-spacing:1.5px; color:#9fe9ff; }
+  #medaltoast.show #mt-name { animation:medalPop .5s ease-out; }
+  @keyframes medalPop { 0% { transform:scale(.86); opacity:.5; } 55% { transform:scale(1.06); } 100% { transform:none; } }
+
   /* Touch controls */
   #touch { position:fixed; inset:0; z-index:7; display:none; pointer-events:none; }
   body.touch #touch { display:block; }
@@ -440,6 +473,8 @@
   <div id="rerollBtn">⟳ REROLL [R]</div>
 </div>
 
+<div id="medaltoast"><div id="mt-label">MEDAL UNLOCKED</div><div id="mt-name"></div><div id="mt-hint"></div></div>
+
 <div id="overlay">
   <div class="card" id="startCard">
     <h1>NEON STRIKE</h1>
@@ -503,6 +538,7 @@
     <div class="final">FINAL SCORE<b id="finalScore">0</b></div>
     <div id="overStats"></div>
     <div id="overUps"></div>
+    <div id="overMedals"></div>
     <div class="best" id="overBest">BEST <b>0</b></div>
     <div class="sub" id="overSub">You reached wave 1.</div>
     <div class="submitnote" id="overSubmit"><span id="overSubmitMsg"></span><button
@@ -1225,6 +1261,11 @@ const sfx = {
                      noiseBurst(0.35, 0.18); },
   novaReady: () => { beep({ freq: 520, slideTo: 1040, type: 'triangle', dur: 0.12, vol: 0.14 });
                      beep({ freq: 780, slideTo: 1560, type: 'triangle', dur: 0.16, vol: 0.12, delay: 0.1 }); },
+  // Medal unlock (item 41): a thin three-note arpeggio. Deliberately quiet and high —
+  // it has to read as a UI chime layered over combat, not as another kill sting.
+  medal: () => { beep({ freq: 784, type: 'triangle', dur: 0.1, vol: 0.11 });
+                 beep({ freq: 1046, type: 'triangle', dur: 0.1, vol: 0.1, delay: 0.09 });
+                 beep({ freq: 1568, slideTo: 1760, type: 'sine', dur: 0.26, vol: 0.09, delay: 0.18 }); },
   heartbeat: () => { beep({ freq: 55, type: 'sine', dur: 0.14, vol: 0.45 });
                      beep({ freq: 50, type: 'sine', dur: 0.12, vol: 0.32, delay: 0.16 }); },
 };
@@ -2127,7 +2168,7 @@ function spawnRandomPickup(forceType) {
 // ===========================================================================
 const state = { running: false, paused: false, choosing: false, rerolled: false, score: 0, wave: 0, toSpawn: 0, spawnTimer: 0,
                 combo: 1, comboTimer: 0, betweenWaves: 0, pickupTimer: 8, shake: 0, time: 0, slowmo: 0, ult: 0, mutator: null,
-                lastHitBy: null, upgrades: [],
+                lastHitBy: null, upgrades: [], waveClean: false,
                 stats: { shots: 0, hits: 0, crits: 0, kills: 0, bestCombo: 1, style: 0, dmgDealt: 0, dmgTaken: 0, wkills: {} } };
 
 // Challenge waves: every 7th wave rolls one mutator, announced with a banner and
@@ -2151,6 +2192,8 @@ function clearMutator() {
 }
 function startWave(n) {
   state.wave = n;
+  state.waveClean = true;   // item 41 — UNTOUCHABLE; any hit taken this wave clears it
+  if (n >= 15) awardMedal('survivor');
   state.toSpawn = 4 + Math.floor(n * 1.7);
   state.spawnTimer = 0;
   document.querySelector('#wave b').textContent = n;
@@ -2200,6 +2243,9 @@ function startWave(n) {
 function nextWaveCheck() {
   if (state.running && state.toSpawn === 0 && enemies.length === 0 && state.betweenWaves <= 0) {
     state.betweenWaves = 2.5;
+    // Item 41 — awarded before showUpgrades() so the toast is queued while the HUD is
+    // still the top layer; #medaltoast outsits the upgrade overlay either way.
+    if (state.waveClean && state.wave >= 5) awardMedal('untouchable');
     clearMutator();   // score bonus + effects end with the last kill of the wave
     showUpgrades();   // halts the countdown (update() skips while choosing)
   }
@@ -2321,6 +2367,94 @@ function showDamageDir(sx, sz) {
   el.style.transition = 'none'; el.style.opacity = 0.9;
   requestAnimationFrame(() => { el.style.transition = 'opacity .8s'; el.style.opacity = 0; });
 }
+
+// ===========================================================================
+// Medals (item 41)
+// ===========================================================================
+// Ten one-shot awards under their own localStorage key. `earned` is permanent, which is
+// what makes a medal toast exactly once ever — on the run that earns it, never again.
+// The lifetime counters share the blob: they are mutated in memory during a run and
+// flushed on award and at gameOver, so nothing writes to localStorage on the kill path.
+// gameOver is the only exit from a run (the pause card has no quit, and returnToTitle is
+// reachable only from the death card), so the only way to lose a run's counters is to
+// close the tab mid-run.
+const MEDALS_KEY = 'neonstrike.medals';
+const MEDALS = [
+  { id: 'firstblood',   icon: '☠',  name: 'FIRST BLOOD',   hint: 'Kill a boss' },
+  { id: 'survivor',     icon: '◈',  name: 'SURVIVOR',      hint: 'Reach wave 15' },
+  { id: 'untouchable',  icon: '✦',  name: 'UNTOUCHABLE',   hint: 'Clear a wave 5+ unhurt' },
+  { id: 'hotstreak',    icon: '✸',  name: 'HOT STREAK',    hint: 'Hit a 6× combo' },
+  { id: 'arsenal',      icon: '⚔',  name: 'ARSENAL',       hint: 'Kill with all 3 weapons in a run' },
+  { id: 'demolition',   icon: '✹',  name: 'DEMOLITIONIST', hint: '10 rocket multi-kills' },
+  { id: 'nova',         icon: '◎',  name: 'NOVA',          hint: 'Catch 3+ enemies in one NOVA' },
+  { id: 'exterminator', icon: '✖',  name: 'EXTERMINATOR',  hint: '1,000 lifetime kills' },
+  { id: 'stylist',      icon: '★',  name: 'STYLIST',       hint: '5,000 lifetime style points' },
+  { id: 'veteran',      icon: '✚',  name: 'VETERAN',       hint: 'Finish 10 runs' },
+];
+let medalSave = { earned: {}, kills: 0, style: 0, runs: 0, rockets: 0 };
+try {
+  const raw = JSON.parse(localStorage.getItem(MEDALS_KEY));
+  // Merge over the defaults rather than trusting the blob: a save written by an older
+  // build is missing whatever counter the newest medal reads.
+  if (raw && typeof raw === 'object') medalSave = { ...medalSave, ...raw, earned: { ...(raw.earned || {}) } };
+} catch {}
+function saveMedals() { try { localStorage.setItem(MEDALS_KEY, JSON.stringify(medalSave)); } catch {} }
+
+const MEDAL_TOAST_T = 2.4, MEDAL_TOAST_GAP = 0.25;
+const medalToast = document.getElementById('medaltoast');
+const medalToastName = document.getElementById('mt-name');
+const medalToastHint = document.getElementById('mt-hint');
+const medalQueue = [];
+let medalTO, medalShowing = false;
+function awardMedal(id) {
+  if (medalSave.earned[id]) return;
+  medalSave.earned[id] = 1;
+  saveMedals();   // rare (ten times in a profile's life), so a sync write here is free
+  medalQueue.push(id);
+  if (!medalShowing) showNextMedal();
+}
+// Serial queue: two medals unlocking on the same kill play one after the other instead of
+// the second overwriting the first. The display timer and the inter-toast gap both live in
+// medalTO, so the single clearTimeout in hideMedalToast kills whichever one is pending.
+function showNextMedal() {
+  const id = medalQueue.shift();
+  if (!id) { medalShowing = false; return; }
+  const m = MEDALS.find(x => x.id === id);
+  medalShowing = true;
+  medalToastName.textContent = `${m.icon} ${m.name}`;
+  medalToastHint.textContent = m.hint;
+  sfx.medal();
+  // Reflow-restart so the pop animation re-fires for the second toast of a queue.
+  medalToast.classList.remove('show'); void medalToast.offsetWidth; medalToast.classList.add('show');
+  clearTimeout(medalTO);
+  medalTO = setTimeout(() => {
+    medalToast.classList.remove('show');
+    medalTO = setTimeout(showNextMedal, MEDAL_TOAST_GAP * 1000);
+  }, MEDAL_TOAST_T * 1000);
+}
+function hideMedalToast(cut) {
+  clearTimeout(medalTO);
+  medalQueue.length = 0; medalShowing = false;
+  if (cut) medalToast.style.transition = 'none';
+  medalToast.classList.remove('show');
+  if (cut) { void medalToast.offsetWidth; medalToast.style.transition = ''; }
+}
+function renderMedalGrid() {
+  document.getElementById('overMedals').innerHTML = MEDALS.map(m => {
+    const got = !!medalSave.earned[m.id];
+    return `<div class="medal${got ? ' got' : ''}"><span class="mi">${m.icon}</span>` +
+           `<b>${m.name}</b><i>${got ? 'EARNED' : m.hint}</i></div>`;
+  }).join('');
+}
+// Hoisted so the ARSENAL check below allocates no closure on the kill path.
+const medalHasWeaponKill = w => state.stats.wkills[w.name];
+
+// Blast multi-kill counter, for NOVA and DEMOLITIONIST. Gated rather than always-on so it
+// cannot drift upward on ordinary kills and read like live state later. A cascade the
+// blast set off — an exploder it killed chaining into its neighbours — counts toward the
+// blast on purpose: from the player's seat that is all one explosion. Neither call site
+// nests inside the other, so one flag is enough.
+let blastKills = 0, blastCounting = false;
 
 // ===========================================================================
 // Shooting
@@ -2500,6 +2634,7 @@ function damageEnemy(enemy, dmg, point, crit, kw, kdist, src) {
 const STREAKS = { 5: '⚡ RAMPAGE', 8: '🔥 UNSTOPPABLE', 12: '💀 GODLIKE' };
 function killEnemy(enemy, kw, kdist, src) {
   const isBoss = enemy.type === 'boss';
+  if (blastCounting) blastKills++;   // item 41: NOVA / DEMOLITIONIST multi-kill tally
   burst(enemy.mesh.position, enemy.color, isBoss ? 60 : 26, isBoss ? 28 : 20, isBoss ? 0.32 : 0.22);
   emitRipple(enemy.mesh.position.x, enemy.mesh.position.z, isBoss ? 1.8 : 1.0);
   spawnDeathVFX(enemy.mesh.position, enemy.color, isBoss, enemy.mini);
@@ -2509,11 +2644,19 @@ function killEnemy(enemy, kw, kdist, src) {
   state.comboTimer = 3.0; state.combo = Math.min(state.combo + 1, 99);
   state.stats.kills++;
   state.stats.bestCombo = Math.max(state.stats.bestCombo, state.combo);
+  medalSave.kills++;   // item 41 — lifetime tally, flushed at gameOver
+  if (medalSave.kills >= 1000) awardMedal('exterminator');
+  if (isBoss) awardMedal('firstblood');
+  if (state.combo >= 6) awardMedal('hotstreak');
   // Favorite-weapon tally: direct hitscan kills carry the weapon (kw), rocket
   // splash carries src='ROCKET'. Upgrade kills (chain/ricochet/trail/nova/
   // volatile) and TRAIL_KW aren't weapons and don't count.
   const wname = kw && weapons.includes(kw) ? kw.name : src === 'ROCKET' ? 'ROCKET' : null;
   if (wname) state.stats.wkills[wname] = (state.stats.wkills[wname] || 0) + 1;
+  // ARSENAL: rocket splash tallies under 'ROCKET', which is weapons[2].name, so the same
+  // map answers "killed with all three" without a second counter. The earned-check comes
+  // first so the scan stops running once it can never change anything.
+  if (wname && !medalSave.earned.arsenal && weapons.every(medalHasWeaponKill)) awardMedal('arsenal');
   // Nova charge — kills made BY the nova blast don't recharge it (no free refunds).
   if (!novaBlasting && state.ult < 100) {
     state.ult = Math.min(100, state.ult + (isBoss ? 25 : 8));
@@ -2538,6 +2681,8 @@ function killEnemy(enemy, kw, kdist, src) {
       let bonus = 0; const parts = [];
       for (const s of styles) { const v = Math.round(s[1] * odm); bonus += v; parts.push(`${s[0]} +${v}`); }
       state.score += bonus; state.stats.style += bonus;
+      medalSave.style += bonus;   // item 41 — lifetime style, flushed at gameOver
+      if (medalSave.style >= 5000) awardMedal('stylist');
       flashTip(parts.join('   '), '#ffe23a');
     }
   }
@@ -2613,11 +2758,14 @@ function activateNova() {
   state.shake = Math.min(0.8, state.shake + 0.6);
   flashCombo('◎ NOVA', '#ff6ec4');
   novaBlasting = true;
+  blastCounting = true; blastKills = 0;   // item 41 — NOVA multi-kill
   for (const e of [...enemies]) {
     const d = Math.hypot(e.mesh.position.x - player.pos.x, e.mesh.position.z - player.pos.z);
     if (d < NOVA_RADIUS) damageEnemy(e, e.type === 'boss' ? 150 : 300, null);
   }
   novaBlasting = false;
+  blastCounting = false;
+  if (blastKills >= 3) awardMedal('nova');
 }
 
 function explodeRocket(pos) {
@@ -2628,10 +2776,16 @@ function explodeRocket(pos) {
   const w = weapons[2];
   const splash = w.splash * mods.splash;
   let hitAny = false;
+  blastCounting = true; blastKills = 0;   // item 41 — DEMOLITIONIST multi-kill
   for (const e of [...enemies]) {
     const d = e.mesh.position.distanceTo(pos);
     // splash doesn't care about facing, but a raised bulwark shield still halves it
     if (d < splash) { hitAny = true; damageEnemy(e, w.damage * mods.damage * (1 - d / splash) * (e.type === 'bulwark' && e.shieldUp ? 0.5 : 1), null, false, null, null, 'ROCKET'); }
+  }
+  blastCounting = false;
+  if (blastKills >= 2) {
+    medalSave.rockets++;
+    if (medalSave.rockets >= 10) awardMedal('demolition');
   }
   if (hitAny) state.stats.hits++;
   // self splash if too close
@@ -3325,6 +3479,7 @@ function collectPickup(p) {
 function damagePlayer(amt, src, by) {
   if (!state.running || player.invuln > 0) return;
   if (by) state.lastHitBy = by;   // death recap: last thing that actually hurt us
+  state.waveClean = false;        // item 41 — UNTOUCHABLE is off the table for this wave
   state.stats.dmgTaken += amt;
   player.hp -= amt; updateHealthUI(); damageFlash(); sfx.hurt();
   if (src) showDamageDir(src.x, src.z);
@@ -3917,7 +4072,10 @@ function resetGame() {
   setMood(1, true);   // item 28: snap arena mood back to the wave-1 baseline on restart
   resetEnv();         // item 31: settle trims/caps/dust glitch state to idle
   gridUniforms.uTime.value = 0; gridUniforms.uRipples.value.forEach(r => r.set(0, 0, -1e3, 0)); rippleIdx = 0;
-  state.lastHitBy = null; state.upgrades = [];
+  state.lastHitBy = null; state.upgrades = []; state.waveClean = false;
+  // Item 41: drop any medal toast (and anything still queued behind it) hard, and settle
+  // the blast tally — a restart taken mid-explosion must not carry either into wave 1.
+  hideMedalToast(true); blastKills = 0; blastCounting = false;
   state.stats = { shots: 0, hits: 0, crits: 0, kills: 0, bestCombo: 1, style: 0, dmgDealt: 0, dmgTaken: 0, wkills: {} };
   lowHp = false; heartbeatT = 0; ui.lowhp.style.opacity = 0;
   // Item 27 overlays — clear speed lines, enrage glitch, and any lingering damage arcs.
@@ -3980,6 +4138,15 @@ function gameOver() {
   const ups = document.getElementById('overUps');
   ups.innerHTML = state.upgrades.map(u => `<span class="chip ${u.rarity}">${u.name}</span>`).join('');
   ups.style.display = state.upgrades.length ? 'flex' : 'none';
+  // Item 41: VETERAN lands here because it is the one medal with no in-run moment — the
+  // recap stamp below IS its feedback, so it never toasts. Flush the counters this run
+  // accumulated, then hard-cut whatever toast is on screen: the death card owns the
+  // screen from here, and a queued toast would otherwise tick away behind it.
+  medalSave.runs++;
+  if (medalSave.runs >= 10) awardMedal('veteran');
+  saveMedals();
+  hideMedalToast(true);
+  renderMedalGrid();
   const isNewBest = state.score > bestScore;
   if (isNewBest) { bestScore = state.score; try { localStorage.setItem(BEST_KEY, bestScore); } catch {} renderBest(); }
   document.getElementById('finalScore').textContent = state.score;
@@ -4057,6 +4224,9 @@ window.__probe = {
   // --- live game objects ---
   state, player, scene, renderer, camera, settings, weapons, enemies,
   get mods()          { return mods; },
+  // Item 41 — the persistent medal blob. Deliberately NOT part of probes.mjs's SNAPSHOT:
+  // its counters climb during a run by design, so a leak diff would read them as a leak.
+  get medals()        { return medalSave; },
   get currentWeapon() { return currentWeapon; },
   get reloading()     { return reloading; },
   // --- pooled entities: every live list and its free list, for the leak probes ---
@@ -4066,7 +4236,7 @@ window.__probe = {
            trailSegPool, waspTrailPool, rocketPool, enemyShotPool },
   // --- control ---
   fn: { startGame, resetGame, gameOver, startWave, pickUpgrade, rerollUpgrades,
-        selectWeapon, reload, togglePause, damagePlayer, returnToTitle },
+        selectWeapon, reload, togglePause, damagePlayer, returnToTitle, awardMedal },
   setKey:  (code, down) => { keys[code] = !!down; },
   setFire: (v) => { mouseDown = !!v; },
   // Aim straight at a world point. Matches the forward vector animate() builds from

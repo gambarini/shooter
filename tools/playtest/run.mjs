@@ -3,7 +3,7 @@
 //
 //   node tools/playtest/run.mjs [options]        # or: make playtest
 //
-//   --scenario soak,perf   which scenarios to run, in order (default: soak,perf)
+//   --scenario soak,perf   which scenarios to run, in order (default: soak,perf,medals)
 //   --waves N              waves to clear in run 1 before dying (default 4)
 //   --perf-wave N          wave to reach before the FPS sample (default 6)
 //   --turbo N              sim sub-steps per frame while playing, 1..8 (default 6)
@@ -28,15 +28,16 @@ import { serve } from './server.mjs';
 import { SNAPSHOT } from './probes.mjs';
 import soak from './scenarios/soak.mjs';
 import perf from './scenarios/perf.mjs';
+import medals from './scenarios/medals.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
 const OUT = join(ROOT, '.playtest');
-const SCENARIOS = { soak, perf };
+const SCENARIOS = { soak, perf, medals };
 
 // ---------------------------------------------------------------- args
 function parseArgs(argv) {
-  const cfg = { scenario: 'soak,perf', waves: 4, perfWave: 6, turbo: 6, seed: 1,
+  const cfg = { scenario: 'soak,perf,medals', waves: 4, perfWave: 6, turbo: 6, seed: 1,
                 url: null, headless: false, keepOpen: false, saveBaseline: false,
                 keepProfile: false, pointLightCap: 8 };
   for (let i = 0; i < argv.length; i++) {
@@ -82,6 +83,14 @@ const ctx = {
   },
   snapshot: () => cdp.eval(SNAPSHOT),
   eval: (...a) => cdp.eval(...a),
+  // Reload the page and restore what a fresh document loses — the in-page bot. The
+  // seeded Math.random survives on its own (addScriptToEvaluateOnNewDocument re-runs).
+  // Needed by any scenario asserting that something PERSISTS, which cannot be faked.
+  async reload() {
+    await cdp.send('Page.navigate', { url: ctx.url });
+    await ctx.waitFor('window.__neonReady === true', { timeout: 30_000, label: 'reboot' });
+    await cdp.eval(readFileSync(join(HERE, 'bot.js'), 'utf8') + '\nreturn true;');
+  },
   // Poll a boolean expression in the page. Every wait in the rig is a condition,
   // never a fixed sleep — turbo makes any hard-coded duration wrong.
   async waitFor(expr, { timeout = 90_000, label = expr, poll = 100, onPoll } = {}) {
@@ -99,6 +108,7 @@ try {
   // 1. serve (unless pointed at an existing build)
   let url = cfg.url;
   if (!url) { server = await serve(ROOT); url = server.url; }
+  ctx.url = url;   // ctx.reload() navigates back here
   console.log(`${C.dim}NEON STRIKE playtest — ${url}  seed=${cfg.seed} turbo=${cfg.turbo}${cfg.headless ? ' headless' : ''}${C.off}\n`);
 
   // 2. dedicated Chrome + CDP
