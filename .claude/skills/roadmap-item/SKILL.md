@@ -180,7 +180,7 @@ In this order:
    **Tuning chosen** / **Notes for next sessions** — including what automation could not
    verify. Say which mode the item was done in, so the log stays comparable across sessions.
 5. **Drain both queues.** Close-out is not finished until they are empty:
-   - Each out-of-scope finding from step 3 becomes a new `todo` row in the Roadmap data
+   - Each out-of-scope finding from §3 (Edit) becomes a new `todo` row in the Roadmap data
      source `collection://2bab5b91-2cad-44b1-8aa3-2f820594f0c4`, now, in this session.
      Title, `Goal` and a one-line spec is enough — the point is that the row exists, not
      that it is fully specced. Small related fixes may share one "bug sweep" row rather
