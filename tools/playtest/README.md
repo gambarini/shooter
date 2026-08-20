@@ -43,6 +43,7 @@ Before believing any FPS number:
 | console / exceptions / failed requests | anything the page logged, including CSP violations |
 | frame times under shotgun spam | jank, stalls, and FPS/draw-call regression vs a local baseline |
 | **medal award / persistence** | a medal that re-toasts, does not persist, or a recap grid that mislabels earned vs unearned |
+| **card reachability at 1280x700 and 844x390** | a CTA that grew below the fold of its own scroll box — items 47/56/57 all hit this and none of them could fail a run on it |
 
 The state diff is the one worth understanding: two snapshots are taken **in the same
 JavaScript turn as the button click that starts a run**, so both are exactly "t = 0 of a
@@ -76,7 +77,7 @@ Three things the game itself had to learn, all in `probe` near the input handler
     make playtest ARGS="--keep-open"          leave Chrome up to poke at a failure
     make playtest ARGS="--seed 7"             a different, still reproducible run
     make playtest ARGS="--waves 6 --turbo 8"  a longer soak
-    make playtest ARGS="--scenario perf"      one scenario (default: soak,perf,medals)
+    make playtest ARGS="--scenario perf"      one scenario (default: soak,perf,medals,layout)
     make playtest ARGS="--save-baseline"      record this machine's perf numbers
     make playtest ARGS="--headless"           SwiftShader: logic and leaks only, FPS meaningless
     make playtest ARGS="--url https://neon-strike-7b6.pages.dev/"   smoke the live site
@@ -100,10 +101,30 @@ real leaderboard. Don't combine those two.
     scenarios/soak.mjs the play/die/restart loop and the leak comparisons
     scenarios/perf.mjs the frame-time sample under shotgun spam
     scenarios/medals.mjs medal awards, the toast queue and the recap grid (item 41)
+    scenarios/layout.mjs card reachability on short/touch viewports (item 67)
 
 To add a check, add a field to `SNAPSHOT` in `probes.mjs` and assert on it — that is the
 cheap path, and it is cheap on purpose. A new scenario is a file in `scenarios/`
 exporting a default `async (ctx) => {}` and a line in `SCENARIOS` in `run.mjs`.
+
+`layout` (item 67) is the other kind of extension: a scenario that changes the
+*environment* rather than the game state. It drives `Emulation` through `ctx.send` — raw
+CDP, because a page cannot resize itself — and asserts that each card's primary button
+both hit-tests as itself and lies inside the viewport, then **clicks it with a dispatched
+input event**. `el.click()` would not do: on the pre-fix build the synthetic call happily
+started a run with `ENTER ARENA` 100px below the fold, which is how the bug survived three
+sessions. Two things it must keep doing: `ctx.reload()` after enabling touch emulation
+(`isTouch` in `index.html` is a boot-time const, so metrics alone measure the desktop
+layout at phone size and never exercise the touch half), and `ctx.reload()` again in
+teardown — a leftover `isTouch === true` routes firing through `touchFire`, and every
+later scenario would silently stop shooting. It runs last for the same reason `medals`
+does, and it leaves `.playtest/layout-*.png` behind for the aesthetic half no check can
+make.
+
+Chrome's own window stays at `--window-size=1280,860` (`chrome.mjs`), and that is no
+longer a workaround for the title card: the frame-time sample is only comparable to a
+machine-local baseline recorded at the same canvas size, so the viewport perf measures
+must not move. Short-viewport reachability is `layout`'s job, at its own sizes.
 
 `medals` shows the two moves a scenario about *persistence* needs. It **seeds** the
 `neonstrike.medals` blob through `__probe.medals` so thresholds a 45-second run can never

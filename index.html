@@ -166,8 +166,16 @@
   #overlay.hidden { display:none; }
   .card { max-width: 600px; padding: 10px 30px; position:relative; }
   /* Death screen can grow tall (stats + upgrades + global top-10); keep it on-screen on mobile.
-     The start card grew the same way once the attract loop's board panel landed (item 54). */
-  #overCard, #startCard { max-height:94vh; overflow-y:auto; }
+     The start card grew the same way once the attract loop's board panel landed (item 54).
+     Item 67 — three separate things have to be true for the card's primary button to stay
+     REACHABLE once the content stops fitting:
+       • `dvh` — 94vh measures the LARGE viewport on mobile, i.e. taller than what is
+         actually visible while the browser UI is up, so the last rows sit off-screen.
+       • `touch-action` — body sets `touch-action:none` for the canvas, and that also
+         forbids a finger from scrolling THIS box. Without pan-y the overflow is dead
+         weight on exactly the devices that overflow first.
+       • the sticky footers below — the button rides the bottom of the scroll box. */
+  #overCard, #startCard { max-height:94vh; max-height:94dvh; overflow-y:auto; touch-action:pan-y; }
   .card.hidden { display:none; }
   .verbadge { position:absolute; bottom:6px; right:14px; font-size:11px; letter-spacing:1px;
               color:#6fa8c9; text-shadow:0 0 6px rgba(0,240,255,.6), 0 0 10px rgba(255,46,136,.3);
@@ -219,6 +227,23 @@
   /* Item 57 — secondary action next to RUN IT BACK. Same shape and hit box (touch
      parity with the primary CTA), quieter skin so the primary still reads first. */
   #overBtns { display:flex; gap:12px; justify-content:center; align-items:center; flex-wrap:wrap; }
+  /* Item 67 — the CTA rides the bottom of the card's scroll box instead of falling below
+     the fold on a short window. Sticky keeps it in normal flow when everything fits (a
+     tall window looks exactly as it did) and pins it inside the scrollport when it does
+     not. The fade is what keeps content scrolling underneath from touching the button,
+     and the -30px margin is .card's horizontal padding — it makes the fade span the whole
+     card rather than reading as a floating panel over the settings box. */
+  #startRow, #overBtns { position:sticky; bottom:0; z-index:2; margin:0 -30px; padding:22px 30px 10px; }
+  /* …and the fade appears ONLY while the card actually scrolls. On a tall window there is
+     nothing passing behind the button and a dark band there is just a smudge. A scroll()
+     timeline is the CSS-only way to ask "does my scroll container have overflow?": with
+     none, the timeline is inactive and the animation never applies, so the row stays
+     transparent. Both keyframes are identical, so when it IS scrollable the fade is a
+     constant, not an animation. Browsers without scroll-driven animations just never paint
+     it — the button is still sticky and still clickable, which is the part that matters.
+     `animation-timeline` must stay AFTER the shorthand, which resets it to `auto`. */
+  @keyframes cardFade { from, to { background:linear-gradient(to top, rgba(5,8,16,.93) 52%, rgba(5,8,16,0)); } }
+  #startRow, #overBtns { animation:cardFade linear both; animation-timeline:scroll(nearest block); }
   #titleBtn { color:#9fe9ff; background:rgba(0,240,255,.07); border:1px solid rgba(0,240,255,.35);
               padding:15px 30px; box-shadow:0 0 14px rgba(0,240,255,.18); }
   #titleBtn:hover { color:#dff8ff; background:rgba(0,240,255,.14); box-shadow:0 0 24px rgba(0,240,255,.45); }
@@ -413,6 +438,17 @@
   #fatal .card { color:#ff8fb4; }
   #fatal h1 { font-size:40px; }
   #fatal p { color:#8fb6c9; margin-top:14px; font-size:14px; letter-spacing:1px; line-height:1.6; }
+  /* Short windows — laptops, mobile landscape (item 67). Last in the sheet so it wins
+     over the base rules it trims. The title art and the gaps are the cheapest height to
+     give back; #attract's min-height is deliberately NOT touched, because it is sized to
+     the tallest panel and shrinking it makes a full board overlap the dots (item 54). */
+  @media (max-height: 780px) {
+    h1 { font-size:44px; letter-spacing:4px; }
+    .sub { margin:10px 0 16px; }
+    #attractDots { margin:6px auto 14px; }
+    #settings { gap:10px; margin:0 auto 12px; padding:12px 22px; }
+    .final { margin:8px 0 14px; }
+  }
 </style>
 </head>
 <body>
@@ -530,7 +566,7 @@
       <label class="srow">BLOOM <input id="setBloom" type="checkbox" checked><span class="val"></span></label>
       <label class="srow">SHOW FPS <input id="setFps" type="checkbox"><span class="val"></span></label>
     </div>
-    <button id="startBtn">► ENTER ARENA</button>
+    <div id="startRow"><button id="startBtn">► ENTER ARENA</button></div>
   </div>
   <div class="card hidden" id="overCard">
     <h1 style="background:linear-gradient(90deg,#ff2e88,#ff8f5c);-webkit-background-clip:text;background-clip:text;">FLATLINED</h1>
@@ -4235,7 +4271,7 @@ window.__probe = {
   pools: { particlePool, tracerPool, dmgNumberPool, shockRingPool, flashPool, gibPool,
            trailSegPool, waspTrailPool, rocketPool, enemyShotPool },
   // --- control ---
-  fn: { startGame, resetGame, gameOver, startWave, pickUpgrade, rerollUpgrades,
+  fn: { startGame, resetGame, gameOver, startWave, showUpgrades, pickUpgrade, rerollUpgrades,
         selectWeapon, reload, togglePause, damagePlayer, returnToTitle, awardMedal },
   setKey:  (code, down) => { keys[code] = !!down; },
   setFire: (v) => { mouseDown = !!v; },

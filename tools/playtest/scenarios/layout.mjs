@@ -1,0 +1,150 @@
+// Card reachability on short viewports (roadmap item 67).
+//
+// The bug this exists to prevent: the title card grew (attract loop, name entry, a
+// second death-screen button) until `ENTER ARENA` sat below the fold inside the card's
+// own `max-height:94vh` scroll box, and `document.elementFromPoint` at its centre
+// returned `#overlay`. Items 47, 56 and 57 each hit it, and item 47 papered over it
+// with an oversized viewport — which is exactly why no automated run ever saw it.
+//
+// So this scenario asserts the primary CTA of each card is HIT-TESTABLE at heights a
+// laptop and a phone in landscape actually have, and clicks the real button to start a
+// run at 1280x700 rather than trusting the hit test alone.
+//
+// It runs LAST, for the same two reasons `medals` does — it reloads the page and it
+// changes the canvas size, so it must not perturb the leak diffs or the FPS sample.
+//
+// Touch emulation needs the reload: `isTouch` is a boot-time const in index.html
+// (`(pointer: coarse)`), so metrics alone would measure the desktop layout at phone
+// size and leave the `touch-action:pan-y` half of the fix unexercised. The teardown
+// reload is just as load-bearing — a leftover `isTouch === true` routes firing through
+// `touchFire` and any later scenario would silently stop shooting.
+
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const OUT = join(resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..'), '.playtest');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// 1280x700: a 13" laptop with browser chrome. 844x390: iPhone 14-class in landscape,
+// the shortest thing the game is expected to be playable on.
+const VIEWPORTS = [
+  { name: 'laptop 1280x700',        width: 1280, height: 700, touch: false },
+  { name: 'mobile landscape 844x390', width: 844, height: 390, touch: true },
+];
+
+// The whole assertion, in the page: the button's own centre must hit the button, and
+// the button must lie inside the viewport rather than clipped past its edge.
+const hit = sel => `const b = document.querySelector('${sel}');
+  if (!b) return JSON.stringify({ found: false });
+  const r = b.getBoundingClientRect();
+  const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  return JSON.stringify({ found: true, same: el === b, hit: el ? (el.id || el.tagName) : 'null',
+    top: Math.round(r.top), bottom: Math.round(r.bottom), vh: innerHeight,
+    left: r.left, width: r.width, height: r.height,
+    inView: r.top >= 0 && r.bottom <= innerHeight && r.width > 0 });`;
+
+async function reachable(ctx, label, sel) {
+  const r = JSON.parse(await ctx.eval(hit(sel)));
+  if (!r.found) { ctx.check(`${label}: ${sel} exists`, false); return null; }
+  ctx.check(`${label}: ${sel} is clickable`, r.same && r.inView,
+            `hit #${r.hit}, y ${r.top}..${r.bottom} of ${r.vh}`);
+  return r;
+}
+
+// A REAL click, at the coordinates the hit test just measured. `el.click()` is not a
+// substitute and this scenario is the proof: on the pre-fix build the synthetic call
+// still started a run with the button 100px below the viewport, so only a dispatched
+// input event tests what a player can actually reach.
+async function clickAt(ctx, r) {
+  const x = r.left + r.width / 2, y = r.top + r.height / 2;
+  await ctx.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, buttons: 0 });
+  await ctx.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+  await ctx.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+}
+
+export default async function layout(ctx) {
+  for (const vp of VIEWPORTS) {
+    await ctx.send('Emulation.setDeviceMetricsOverride',
+                   { width: vp.width, height: vp.height, deviceScaleFactor: 1, mobile: vp.touch });
+    await ctx.send('Emulation.setTouchEmulationEnabled', { enabled: vp.touch, maxTouchPoints: 5 });
+    // Reload so `isTouch` and `body.touch` are re-derived under the emulated device,
+    // and so every leg starts from the title card in the same state.
+    await ctx.reload();
+    await ctx.waitFor(`innerHeight === ${vp.height} && !document.getElementById('startCard').classList.contains('hidden')`,
+                      { timeout: 10_000, label: `${vp.name} title card`, poll: 100 });
+    await sleep(150);   // one paint at the new size before anything is measured
+    await ctx.eval('window.__probe.driven = true; return true;');
+    const touched = await ctx.eval('return document.body.classList.contains("touch");');
+    ctx.log(`${vp.name} — body.touch=${touched}, card ${await ctx.eval(
+      `const c = document.getElementById('startCard');
+       return c.scrollHeight + 'px of content in ' + c.clientHeight + 'px';`)}`);
+
+    // ---------------------------------------------------------------- title card
+    const startRect = await reachable(ctx, vp.name, '#startBtn');
+    await shot(ctx, `title-${vp.width}x${vp.height}`);
+
+    // The hit test says the pixel belongs to the button; this says the game actually
+    // starts from a real click at that size — the thing item 47's viewport override hid.
+    if (startRect) await clickAt(ctx, startRect);
+    const running = await ctx.eval('return window.__probe.state.running === true;');
+    ctx.check(`${vp.name}: clicking ENTER ARENA starts a run`, running);
+
+    // ---------------------------------------------------------------- death card
+    // Reported, not asserted: the upgrade screen is not in this item's scope, but it is
+    // the same class of bug and a session should see the number. Unhidden and re-hidden
+    // inside one JS turn, so nothing paints.
+    if (running) {
+      // Opened for real through `__probe.fn`, then dismissed by taking the first card —
+      // an upgrade screen faked by un-hiding the element measures an empty container.
+      const up = JSON.parse(await ctx.eval(`window.__probe.fn.showUpgrades();
+        const cards = [...document.querySelectorAll('#upcards .upcard')];
+        const box = cards.map(c => c.getBoundingClientRect());
+        const off = box.filter(r => r.top < 0 || r.bottom > innerHeight).length;
+        const hits = box.map(r => { const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+                                    return el && el.closest('.upcard') ? 'card' : (el ? (el.id || el.tagName) : 'null'); });
+        const reroll = document.getElementById('rerollBtn').getBoundingClientRect();
+        window.__probe.fn.pickUpgrade(0);
+        return JSON.stringify({ cards: cards.length, off, hits: hits.join(','),
+          h: box.length ? Math.round(box[0].height) : 0, vh: innerHeight,
+          rerollBottom: Math.round(reroll.bottom) });`));
+      ctx.log(`${vp.name} — upgrade screen: ${up.cards} card(s) ${up.h}px tall, ${up.off} clipped, ` +
+              `centres hit ${up.hits}, REROLL ends at y=${up.rerollBottom} of ${up.vh}`);
+
+      await ctx.eval('window.__probe.fn.gameOver(); return true;');
+      await ctx.waitFor(`!document.getElementById('overCard').classList.contains('hidden')`,
+                        { timeout: 10_000, label: 'the death card', poll: 100 });
+      await sleep(150);
+      await reachable(ctx, vp.name, '#againBtn');
+      await reachable(ctx, vp.name, '#titleBtn');
+      // Reported, not asserted: only the two BUTTONS are in item 67's scope, but the
+      // first-timer name row sits mid-card, above them, and cannot be made sticky the
+      // same way. This is the number a follow-up would act on.
+      const nr = JSON.parse(await ctx.eval(`const n = document.getElementById('nameRow');
+        const c = document.getElementById('overCard'); const r = n.getBoundingClientRect();
+        return JSON.stringify({ shown: n.style.display !== 'none', scrollTop: Math.round(c.scrollTop),
+          top: Math.round(r.top), bottom: Math.round(r.bottom), vh: innerHeight });`));
+      ctx.log(`${vp.name} — first-timer name row: ${nr.shown ? 'shown' : 'hidden'}, ` +
+              `y ${nr.top}..${nr.bottom} of ${nr.vh} (card scrolled ${nr.scrollTop}px)`);
+      await shot(ctx, `death-${vp.width}x${vp.height}`);
+      await ctx.eval('window.__probe.fn.returnToTitle(); return true;');
+    }
+  }
+
+  // ---------------------------------------------------------------- teardown
+  await ctx.send('Emulation.clearDeviceMetricsOverride');
+  await ctx.send('Emulation.setTouchEmulationEnabled', { enabled: false, maxTouchPoints: 1 });
+  await ctx.reload();   // NOT optional — see the header: `isTouch` is decided at boot
+  const back = await ctx.eval('return !document.body.classList.contains("touch") && innerHeight > 600;');
+  ctx.check('viewport emulation cleared', back, `innerHeight ${await ctx.eval('return innerHeight;')}`);
+}
+
+// The one thing here a human still has to judge — whether the compressed card and the
+// sticky footer LOOK right — so leave the frames behind for them.
+async function shot(ctx, name) {
+  try {
+    mkdirSync(OUT, { recursive: true });
+    const s = await ctx.send('Page.captureScreenshot', { format: 'png' });
+    writeFileSync(join(OUT, `layout-${name}.png`), Buffer.from(s.data, 'base64'));
+  } catch { /* a screenshot is a courtesy, never a reason to fail a run */ }
+}

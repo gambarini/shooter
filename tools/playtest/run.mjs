@@ -3,7 +3,7 @@
 //
 //   node tools/playtest/run.mjs [options]        # or: make playtest
 //
-//   --scenario soak,perf   which scenarios to run, in order (default: soak,perf,medals)
+//   --scenario soak,perf   which scenarios to run, in order (default: soak,perf,medals,layout)
 //   --waves N              waves to clear in run 1 before dying (default 4)
 //   --perf-wave N          wave to reach before the FPS sample (default 6)
 //   --turbo N              sim sub-steps per frame while playing, 1..8 (default 6)
@@ -29,15 +29,16 @@ import { SNAPSHOT } from './probes.mjs';
 import soak from './scenarios/soak.mjs';
 import perf from './scenarios/perf.mjs';
 import medals from './scenarios/medals.mjs';
+import layout from './scenarios/layout.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
 const OUT = join(ROOT, '.playtest');
-const SCENARIOS = { soak, perf, medals };
+const SCENARIOS = { soak, perf, medals, layout };
 
 // ---------------------------------------------------------------- args
 function parseArgs(argv) {
-  const cfg = { scenario: 'soak,perf,medals', waves: 4, perfWave: 6, turbo: 6, seed: 1,
+  const cfg = { scenario: 'soak,perf,medals,layout', waves: 4, perfWave: 6, turbo: 6, seed: 1,
                 url: null, headless: false, keepOpen: false, saveBaseline: false,
                 keepProfile: false, pointLightCap: 8 };
   for (let i = 0; i < argv.length; i++) {
@@ -83,6 +84,10 @@ const ctx = {
   },
   snapshot: () => cdp.eval(SNAPSHOT),
   eval: (...a) => cdp.eval(...a),
+  // Raw CDP, for the domains that have no in-page equivalent — Emulation (viewport and
+  // touch, item 67) and Page.captureScreenshot. Everything about the GAME still goes
+  // through `__probe`; this is for things the page cannot do to itself.
+  send: (...a) => cdp.send(...a),
   // Reload the page and restore what a fresh document loses — the in-page bot. The
   // seeded Math.random survives on its own (addScriptToEvaluateOnNewDocument re-runs).
   // Needed by any scenario asserting that something PERSISTS, which cannot be faked.
