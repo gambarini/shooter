@@ -1,0 +1,245 @@
+// The alternating boss waves (roadmap item 45). Everything in the item's "Done when"
+// that a machine can settle: wave 10 is the ARTILLERY fight, wave 5 is still the melee
+// one, the barrage telegraphs and then returns every decal to its pool, phase 2 really
+// escalates, minis join the wave, and killing the boss takes its live shells with it.
+//
+// The soak run never gets near a boss wave — it clears four waves and dies — so none of
+// this is covered by the leak diffs. It is driven from `startWave(N)` instead, with the
+// regular spawn queue zeroed so the boss fights alone and every count below is about the
+// boss and nothing else.
+//
+// The bot is stopped for the whole scenario: it dodges, and a barrage nobody stands in
+// proves nothing. The player is parked and topped up between polls instead, so the fight
+// runs long enough to reach phase 2 — which is also what makes "the mortars hurt, and the
+// recap names what fired them" assertable.
+//
+// It runs after `perf` (which needs turbo 1 and an undisturbed frame sample) and before
+// `medals` (which rewrites localStorage and reloads).
+
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const OUT = join(resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..'), '.playtest');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Half of this item is a silhouette, a colour and whether a ground telegraph reads as a
+// warning — none of which a check can settle. Leave the frames behind for the human half,
+// aimed at the boss so they are actually of the thing (`layout` does the same).
+async function shot(ctx, name, atMark = false) {
+  try {
+    // Drop out of turbo first: at turbo 6 the ~120 ms between aiming and capturing is four
+    // simulated seconds, and every telegraph this frame is meant to show has already
+    // detonated by the time the shutter opens.
+    await ctx.eval(`window.__probe.turbo = 1; return true;`);
+    // ...and, for the telegraph frame, wait at that speed for a volley to actually be in
+    // the air. Marks live 1.1 s; anything else photographs the crater instead.
+    for (let i = 0; atMark && i < 200; i++) {
+      if (await ctx.eval('return window.__probe.live.mortarMarks.length > 0;')) break;
+      await sleep(100);
+    }
+    await ctx.eval(`const p = window.__probe;
+      // The parked dummy is standing in a barrage no real player would stand in, so its
+      // damage flash is up almost permanently and would white out the frame. Drop it: these
+      // frames exist to judge the telegraph and the silhouette, not the hit feedback.
+      document.getElementById('damageflash').style.opacity = 0;
+      const mk = ${atMark} && p.live.mortarMarks[0];
+      if (mk) {
+        // A frame OF the telegraph: stand a dodge away from a live mark and look down at it.
+        p.player.pos.x = mk.x + 17; p.player.pos.z = mk.z + 17;
+        p.lookAt(mk.x, 0, mk.z);
+        return true;
+      }
+      const b = p.enemies.find(e => e.type === 'boss');
+      if (b) {
+        // Stand off at a fixed distance and aim at the hull, so every frame this leaves
+        // behind is the same portrait and two sessions' screenshots are comparable.
+        const a = Math.atan2(p.player.pos.x - b.mesh.position.x, p.player.pos.z - b.mesh.position.z);
+        p.player.pos.x = b.mesh.position.x + Math.sin(a) * 16;
+        p.player.pos.z = b.mesh.position.z + Math.cos(a) * 16;
+        p.lookAt(b.mesh.position.x, b.mesh.position.y, b.mesh.position.z);
+      }
+      return true;`);
+    await sleep(120);
+    mkdirSync(OUT, { recursive: true });
+    const s = await ctx.send('Page.captureScreenshot', { format: 'png' });
+    writeFileSync(join(OUT, `boss-${name}.png`), Buffer.from(s.data, 'base64'));
+  } catch { /* a screenshot is a courtesy, never a reason to fail a run */ }
+  await ctx.eval(`window.__probe.turbo = ${ctx.cfg.turbo}; return true;`);
+}
+
+// One compact read of everything this scenario asserts on. Same rule as the rest of the
+// rig: through `__probe`, never by fingerprinting the scene graph.
+const STATUS = `const p = window.__probe;
+  const b = p.enemies.find(e => e.type === 'boss');
+  let lights = 0; p.scene.traverse(o => { if (o.isPointLight) lights++; });
+  return JSON.stringify({
+    wave: p.state.wave, running: p.state.running,
+    boss: b ? { kind: b.bossKind || null, name: b.bossName || null, phase: b.phase,
+                staggerT: +b.staggerT.toFixed(2), hp: Math.round(b.hp), maxHp: Math.round(b.maxHp),
+                fireCD: +b.fireCD.toFixed(2),
+                dist: +Math.hypot(b.mesh.position.x - p.player.pos.x,
+                                  b.mesh.position.z - p.player.pos.z).toFixed(1) } : null,
+    marks: p.live.mortarMarks.length, markPool: p.pools.mortarMarkPool.length,
+    minis: p.enemies.filter(e => e.mini).length, enemies: p.enemies.length,
+    shots: p.live.enemyShots.length, lights,
+    dmgTaken: Math.round(p.state.stats.dmgTaken), lastHitBy: p.state.lastHitBy,
+    card: document.querySelector('#bosscard .bc-name').textContent,
+    enraged: document.getElementById('bossfill').classList.contains('enraged'),
+    bossWrap: document.getElementById('bosswrap').style.display });`;
+
+export default async function boss(ctx) {
+  const status = () => ctx.eval(STATUS).then(JSON.parse);
+
+  // Start a run, jump straight to wave N, and empty the wave's own spawn queue so the
+  // only things alive are the boss and whatever the boss itself makes.
+  //
+  // The player becomes a target dummy: a huge hp pool rather than `invuln`, because every
+  // check below needs the barrage to actually connect (dmgTaken, lastHitBy) — it only must
+  // not END the run. At turbo 6 a 100 ms poll is ~3 s of simulated time, so topping a
+  // 100 hp bar up between polls loses the race with a five-shell volley, and the fight
+  // freezes on the death card halfway through the scenario.
+  const enterWave = async n => {
+    await ctx.eval(`const p = window.__probe;
+      p.driven = true; p.turbo = ${ctx.cfg.turbo};
+      p.fn.startGame(); p.fn.startWave(${n});
+      p.state.toSpawn = 0;
+      for (const e of [...p.enemies]) if (e.type !== 'boss') p.fn.damageEnemy(e, 1e9);
+      p.player.maxHp = 1e7; p.player.hp = 1e7;
+      return true;`);
+    return status();
+  };
+  const tickAlive = async () => {
+    await ctx.eval(`const p = window.__probe; p.player.hp = p.player.maxHp; return true;`);
+    return status();
+  };
+
+  await ctx.eval('if (window.__bot) window.__bot.stop(); return true;');
+
+  // ------------------------------------------------------------------ wave 10: ARTILLERY
+  let s = await enterWave(10);
+  ctx.check('wave 10 spawns the ARTILLERY boss', s.boss && s.boss.kind === 'artillery',
+            s.boss ? `${s.boss.kind} "${s.boss.name}", ${s.boss.hp} hp` : 'no boss');
+  ctx.check('the intro card draws from the ARTILLERY name pool', s.boss && s.card === s.boss.name,
+            `card "${s.card}" vs record "${s.boss && s.boss.name}"`);
+  // The item-49 intro owns the first 2.2 s (slow-mo plus the title card). A shell landing
+  // inside it would be unreadable and unfair, and no automated check can see that later —
+  // so the opening reload is asserted at the one moment it is knowable.
+  await shot(ctx, 'intro-card');   // the card is up for 2.2 real seconds, so grab it now
+  ctx.check('the first barrage waits out the boss intro', s.marks === 0 && s.boss && s.boss.fireCD > 2.2,
+            `${s.boss ? s.boss.fireCD : '?'}s before the opening volley, ${s.marks} marks`);
+
+  // Telegraphs: the first volley must WAIT (the item-49 intro owns the first ~3 seconds),
+  // then paint several ground decals at once.
+  let peak1 = 0, cdMax1 = 0, sawMarks = false;
+  for (let i = 0; i < 90 && !(sawMarks && s.boss && s.boss.phase === 1 && cdMax1 > 0); i++) {
+    s = await tickAlive();
+    peak1 = Math.max(peak1, s.marks); cdMax1 = Math.max(cdMax1, s.boss ? s.boss.fireCD : 0);
+    if (s.marks > 0) sawMarks = true;
+    if (sawMarks && i > 40) break;
+    await sleep(100);
+  }
+  ctx.check('the barrage telegraphs before it lands (3+ ground marks in one volley)', peak1 >= 3,
+            `peak ${peak1} marks, standoff ${s.boss ? s.boss.dist : '?'} units`);
+  if (s.marks > 0) { await shot(ctx, 'phase1-barrage'); await shot(ctx, 'telegraph', true); }
+  ctx.check('mortar marks are pooled, not leaked', s.markPool >= peak1 - s.marks,
+            `${s.marks} live, ${s.markPool} in the pool`);
+
+  // The shells hit, and the recap says what hit you. `lastHitBy` is exactly the string
+  // the death card prints, so this is the killed-by check.
+  await ctx.waitFor(`/BARRAGE/.test(window.__probe.state.lastHitBy || '')`,
+                    { timeout: 30_000, poll: 150, label: 'a mortar to land on the player',
+                      onPoll: () => ctx.eval(`window.__probe.player.hp = window.__probe.player.maxHp; return true;`) });
+  s = await status();
+  ctx.check('a mortar impact damages the player and names the ARTILLERY that fired it',
+            s.dmgTaken > 0 && /BARRAGE/.test(s.lastHitBy || ''), `FLATLINED BY: ${s.lastHitBy}`);
+
+  // Minis: the 12 s timer, which turbo makes reachable inside a scenario.
+  await ctx.waitFor(`window.__probe.enemies.some(e => e.mini)`,
+                    { timeout: 60_000, poll: 200, label: 'the artillery to spawn minis',
+                      onPoll: () => ctx.eval(`window.__probe.player.hp = window.__probe.player.maxHp; return true;`) });
+  s = await status();
+  ctx.check('the artillery spawns minis, and they count toward the wave',
+            s.minis >= 2 && s.enemies === s.minis + 1, `${s.minis} minis, ${s.enemies} enemies alive`);
+
+  // ------------------------------------------------------------------ phase 2
+  // bossEnrage fires from inside damageEnemy, so drive it through the real damage path.
+  await ctx.eval(`const p = window.__probe;
+    const b = p.enemies.find(e => e.type === 'boss');
+    p.fn.damageEnemy(b, b.hp - b.maxHp * 0.45);   // one hit past the 50% threshold
+    return true;`);
+  s = await status();
+  ctx.check('phase 2 opens with the stagger telegraph', s.boss && s.boss.phase === 2 && s.boss.staggerT > 0,
+            `phase ${s.boss && s.boss.phase}, stagger ${s.boss && s.boss.staggerT}s`);
+  await ctx.waitFor(`(window.__probe.enemies.find(e => e.type === 'boss') || {}).staggerT <= 0`,
+                    { timeout: 20_000, poll: 100, label: 'the stagger to end' });
+
+  let peak2 = 0, cdMax2 = 0;
+  for (let i = 0; i < 60; i++) {
+    s = await tickAlive();
+    peak2 = Math.max(peak2, s.marks); cdMax2 = Math.max(cdMax2, s.boss ? s.boss.fireCD : 0);
+    await sleep(100);
+  }
+  ctx.check('phase 2 escalates: volleys come faster', cdMax2 > 0 && cdMax2 < cdMax1,
+            `reload ${cdMax1}s → ${cdMax2}s`);
+  ctx.check('phase 2 escalates: volleys get wider', peak2 >= peak1,
+            `${peak1} marks per volley → ${peak2}`);
+  if (peak2 > 0) await shot(ctx, 'phase2-barrage');
+  ctx.check('the boss bar tracks the fight and flips to enraged',
+            s.bossWrap === 'block' && s.enraged, `bar=${s.bossWrap}, enraged=${s.enraged}`);
+  ctx.check('the artillery fight stays inside the point-light budget',
+            s.lights <= ctx.cfg.pointLightCap, `${s.lights} lights (cap ${ctx.cfg.pointLightCap})`);
+
+  // ------------------------------------------------------------------ the boss owns its shells
+  // Kill it mid-barrage. Left behind, those fuses freeze under the upgrade screen and
+  // detonate on the player in the NEXT wave, fired by a boss that no longer exists.
+  await ctx.waitFor(`window.__probe.live.mortarMarks.length > 0`,
+                    { timeout: 30_000, poll: 60, label: 'a live barrage to kill the boss under',
+                      onPoll: () => ctx.eval(`window.__probe.player.hp = window.__probe.player.maxHp; return true;`) });
+  const before = (await status()).marks;
+  await ctx.eval(`const p = window.__probe;
+    p.fn.damageEnemy(p.enemies.find(e => e.type === 'boss'), 1e9); return true;`);
+  s = await status();
+  ctx.check('killing the boss takes its live barrage with it', before > 0 && s.marks === 0,
+            `${before} marks in the air → ${s.marks}, ${s.markPool} pooled`);
+  ctx.check('the boss bar clears when the boss dies', !s.boss, s.bossWrap);
+
+  // ------------------------------------------------------------------ restart is clean
+  await ctx.waitFor(`window.__probe.live.mortarMarks.length > 0`,
+                    { timeout: 40_000, poll: 60, label: 'a second barrage to restart under',
+                      onPoll: async () => {
+                        const t = await tickAlive();
+                        if (!t.boss || !t.running) await enterWave(10);
+                      } });
+  const poolBefore = (await status()).markPool;
+  await ctx.eval('window.__probe.fn.resetGame(); return true;');
+  s = await status();
+  ctx.check('a restart mid-barrage returns every mark to the pool',
+            s.marks === 0 && s.markPool > poolBefore, `live ${s.marks}, pool ${poolBefore} → ${s.markPool}`);
+
+  // ------------------------------------------------------------------ wave 5 unchanged
+  s = await enterWave(5);
+  ctx.check('wave 5 still spawns the melee boss', s.boss && s.boss.kind === 'melee',
+            s.boss ? `${s.boss.kind} "${s.boss.name}"` : 'no boss');
+  await shot(ctx, 'melee-wave5');
+  ctx.check('the melee boss keeps its own name pool', s.boss && s.card === s.boss.name,
+            `card "${s.card}"`);
+  let meleeMarks = 0, meleeShots = 0;
+  for (let i = 0; i < 60; i++) {
+    s = await tickAlive();
+    meleeMarks = Math.max(meleeMarks, s.marks); meleeShots = Math.max(meleeShots, s.shots);
+    await sleep(100);
+  }
+  // The negative is the point: the melee fight must not have grown a barrage, and it must
+  // still be firing the volleys it always fired.
+  ctx.check('the melee boss fires no mortars at all', meleeMarks === 0, `${meleeMarks} marks seen`);
+  ctx.check('the melee boss still fires its volleys', meleeShots > 0, `${meleeShots} shots in the air`);
+
+  // Leave the page the way `medals` expects to find it. `perf` leaves the bot RUNNING and
+  // `medals` quietly depends on that: with nobody dodging, its parked player dies to wave 1
+  // inside the toast-queue wait, and gameOver() empties the queue that check is watching.
+  // Restarting the bot here is not tidiness — without it, medals fails.
+  await ctx.eval(`const p = window.__probe; p.fn.resetGame(); p.state.running = false;
+    if (window.__bot) window.__bot.start();
+    return true;`);
+}

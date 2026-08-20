@@ -43,6 +43,7 @@ Before believing any FPS number:
 | console / exceptions / failed requests | anything the page logged, including CSP violations |
 | frame times under shotgun spam | jank, stalls, and FPS/draw-call regression vs a local baseline |
 | **medal award / persistence** | a medal that re-toasts, does not persist, or a recap grid that mislabels earned vs unearned |
+| **alternating boss waves** | wave 10's ARTILLERY telegraphing, escalating, spawning minis and taking its live barrage with it when it dies — and wave 5's melee fight still being the melee fight |
 | **card reachability at 1280x700, 844x390 and 1280x950** | a CTA — or the death card's first-timer NAME row — that grew below the fold of its own scroll box, or under the sticky footer; items 47/56/57 all hit this and none of them could fail a run on it |
 | **sticky footer paint, in both states** | a footer band that lets the content behind it stay legible while the card scrolls — or that paints at all on a window where nothing overflows (item 67's property) |
 
@@ -78,7 +79,7 @@ Three things the game itself had to learn, all in `probe` near the input handler
     make playtest ARGS="--keep-open"          leave Chrome up to poke at a failure
     make playtest ARGS="--seed 7"             a different, still reproducible run
     make playtest ARGS="--waves 6 --turbo 8"  a longer soak
-    make playtest ARGS="--scenario perf"      one scenario (default: soak,perf,medals,layout)
+    make playtest ARGS="--scenario perf"      one scenario (default: soak,perf,boss,medals,layout)
     make playtest ARGS="--save-baseline"      record this machine's perf numbers
     make playtest ARGS="--headless"           SwiftShader: logic and leaks only, FPS meaningless
     make playtest ARGS="--url https://neon-strike-7b6.pages.dev/"   smoke the live site
@@ -101,6 +102,7 @@ real leaderboard. Don't combine those two.
     probes.mjs         probe expressions + the assertions over them
     scenarios/soak.mjs the play/die/restart loop and the leak comparisons
     scenarios/perf.mjs the frame-time sample under shotgun spam
+    scenarios/boss.mjs the wave 5 / wave 10 boss fights (item 45)
     scenarios/medals.mjs medal awards, the toast queue and the recap grid (item 41)
     scenarios/layout.mjs card reachability on short/touch viewports (item 67)
 
@@ -147,6 +149,32 @@ lives on a `::before`, so the check reads `getComputedStyle(row, '::before')` in
 states and a tail check fails the scenario if a run only ever saw one of them — "opacity
 0, no band" is also what a rule that never applied looks like, and a single-state check
 could not tell the two apart.
+
+`boss` (item 45) is the third shape: a scenario about a fight the ordinary run never
+reaches. The soak clears four waves and dies, so wave 5 and wave 10 were unverified
+territory — it jumps there with `startWave(N)`, zeroes `state.toSpawn`, and kills whatever
+the wave already queued, so every count it reports is about the boss and nothing else.
+Four things it must keep doing:
+
+- **`__probe.fn.damageEnemy`** — `bossEnrage` fires from *inside* `damageEnemy`, so writing
+  `boss.hp` from the outside reaches 40% hp without ever entering phase 2, and "phase 2
+  escalates" would be asserted against a boss still in phase 1. Same shape as item 70's
+  `renderGlobalBoard`: one function on `__probe.fn`.
+- **the target-dummy hp pool** (`player.maxHp = 1e7`), not `invuln`. Every check here needs
+  the barrage to connect — `dmgTaken`, and `lastHitBy`, which is the exact string the death
+  card prints. At turbo 6 a 100 ms poll is ~3 s of simulated time, so topping up a 100 hp
+  bar between polls loses the race with a five-shell volley and the scenario ends up
+  asserting against a frozen death screen.
+- **restart the bot in teardown.** `perf` leaves it running and `medals` silently depends on
+  that: with nobody dodging, its parked player dies inside the toast-queue wait and
+  `gameOver()` empties the queue the check is watching. Stopping the bot here without
+  handing it back fails a scenario two files away.
+- **turbo 1 around each screenshot.** At turbo 6 the ~120 ms between aiming the camera and
+  the shutter is four simulated seconds — every telegraph the frame exists to show has
+  already detonated, and you photograph the crater.
+
+Its `.playtest/boss-*.png` frames are the aesthetic half, same bargain as `layout`'s: the
+silhouette, the amber, and whether a ground telegraph reads as a warning are for a human.
 
 `--url` against the live site fails the NAME-row checks until the fix deploys; that is the
 lag between `main` and Pages, not a regression.
