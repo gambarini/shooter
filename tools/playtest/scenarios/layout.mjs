@@ -1,4 +1,4 @@
-// Card reachability on short viewports (roadmap item 67).
+// Card reachability on short viewports (roadmap items 67 and 70).
 //
 // The bug this exists to prevent: the title card grew (attract loop, name entry, a
 // second death-screen button) until `ENTER ARENA` sat below the fold inside the card's
@@ -8,7 +8,8 @@
 //
 // So this scenario asserts the primary CTA of each card is HIT-TESTABLE at heights a
 // laptop and a phone in landscape actually have, and clicks the real button to start a
-// run at 1280x700 rather than trusting the hit test alone.
+// run at 1280x700 rather than trusting the hit test alone. Item 70 added the death
+// card's first-timer NAME row, which item 67 could only log — see nameRowReachable.
 //
 // It runs LAST, for the same two reasons `medals` does — it reloads the page and it
 // changes the canvas size, so it must not perturb the leak diffs or the FPS sample.
@@ -27,10 +28,15 @@ const OUT = join(resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '.
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // 1280x700: a 13" laptop with browser chrome. 844x390: iPhone 14-class in landscape,
-// the shortest thing the game is expected to be playable on.
+// the shortest thing the game is expected to be playable on. 1280x950 is item 70's
+// CONTROL — the height at which the death card fits and nothing should have to scroll;
+// it is here so a future fix for a short viewport cannot quietly start moving a tall one
+// (and because with the global board rendered even 950 overflows, which 700 and 390 do
+// not distinguish: they overflow before the board lands).
 const VIEWPORTS = [
   { name: 'laptop 1280x700',        width: 1280, height: 700, touch: false },
   { name: 'mobile landscape 844x390', width: 844, height: 390, touch: true },
+  { name: 'desktop 1280x950',       width: 1280, height: 950, touch: false },
 ];
 
 // The whole assertion, in the page: the button's own centre must hit the button, and
@@ -50,6 +56,28 @@ async function reachable(ctx, label, sel) {
   ctx.check(`${label}: ${sel} is clickable`, r.same && r.inView,
             `hit #${r.hit}, y ${r.top}..${r.bottom} of ${r.vh}`);
   return r;
+}
+
+// The first-timer NAME row (item 70). It is not a sticky footer, so it is reachable only
+// because `revealNameRow()` scrolls the card to it — which means asserting the row is
+// SHOWN, that its two live targets hit-test as themselves inside the viewport (the
+// pre-fix build failed exactly here: geometrically inside the scrollport, but painted
+// under #overBtns' sticky band, so `elementFromPoint` returned the footer), and that the
+// touch leg did NOT focus the field — autofocus there throws the on-screen keyboard over
+// the recap, which is the reason the touch path has no focus call to begin with.
+async function nameRowReachable(ctx, vp, label) {
+  const nr = JSON.parse(await ctx.eval(`const n = document.getElementById('nameRow');
+    const c = document.getElementById('overCard'); const r = n.getBoundingClientRect();
+    return JSON.stringify({ shown: n.style.display !== 'none', scrollTop: Math.round(c.scrollTop),
+      top: Math.round(r.top), bottom: Math.round(r.bottom), vh: innerHeight,
+      focused: document.activeElement === document.getElementById('handleInput') });`));
+  ctx.log(`${vp.name} — ${label}: ${nr.shown ? 'shown' : 'hidden'}, y ${nr.top}..${nr.bottom} ` +
+          `of ${nr.vh} (card scrolled ${nr.scrollTop}px, field focused: ${nr.focused})`);
+  ctx.check(`${vp.name}: ${label} is shown`, nr.shown);
+  if (!nr.shown) return;
+  await reachable(ctx, `${vp.name} ${label}`, '#handleInput');
+  await reachable(ctx, `${vp.name} ${label}`, '#submitName');
+  if (vp.touch) ctx.check(`${vp.name}: ${label} does not autofocus (no on-screen keyboard)`, !nr.focused);
 }
 
 // A REAL click, at the coordinates the hit test just measured. `el.click()` is not a
@@ -122,16 +150,25 @@ export default async function layout(ctx) {
       await sleep(150);
       await reachable(ctx, vp.name, '#againBtn');
       await reachable(ctx, vp.name, '#titleBtn');
-      // Reported, not asserted: only the two BUTTONS are in item 67's scope, but the
-      // first-timer name row sits mid-card, above them, and cannot be made sticky the
-      // same way. This is the number a follow-up would act on.
-      const nr = JSON.parse(await ctx.eval(`const n = document.getElementById('nameRow');
-        const c = document.getElementById('overCard'); const r = n.getBoundingClientRect();
-        return JSON.stringify({ shown: n.style.display !== 'none', scrollTop: Math.round(c.scrollTop),
-          top: Math.round(r.top), bottom: Math.round(r.bottom), vh: innerHeight });`));
-      ctx.log(`${vp.name} — first-timer name row: ${nr.shown ? 'shown' : 'hidden'}, ` +
-              `y ${nr.top}..${nr.bottom} of ${nr.vh} (card scrolled ${nr.scrollTop}px)`);
+      await nameRowReachable(ctx, vp, 'first-timer name row');
       await shot(ctx, `death-${vp.width}x${vp.height}`);
+
+      // …and again once the global board lands UNDER the row. `make playtest` is
+      // static, so the real rank GET 404s and this case never happens on its own —
+      // `__probe.fn.renderGlobalBoard` (item 70) draws the same DOM with no network.
+      // This is the half of the fix that a green run would otherwise never touch:
+      // the board grows the card after the row was already revealed.
+      const canBoard = await ctx.eval('return typeof window.__probe.fn.renderGlobalBoard === "function";');
+      if (!canBoard) ctx.log(`${vp.name} — build predates __probe.fn.renderGlobalBoard; board-lands-late case not measured`);
+      else {
+        await ctx.eval(`const top = Array.from({ length: 10 }, (_, i) => (
+            { name: 'PILOT' + i, score: 9000 - i * 100, wave: 12 - i }));
+          window.__probe.fn.renderGlobalBoard({ top, total: 42, rank: 7 }, null, 0, 1);
+          return true;`);
+        await sleep(150);
+        await nameRowReachable(ctx, vp, 'name row survives the board');
+        await shot(ctx, `death-board-${vp.width}x${vp.height}`);
+      }
       await ctx.eval('window.__probe.fn.returnToTitle(); return true;');
     }
   }

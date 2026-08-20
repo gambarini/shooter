@@ -3822,6 +3822,27 @@ let boardFinal = false;
 
 function saveName() { try { localStorage.setItem(NAME_KEY, playerName); } catch {} }
 
+// Item 70 — the row is only useful if the player can SEE it. It sits mid-card, above
+// item 67's sticky #overBtns, so it cannot be pinned the same way; instead the card
+// scrolls itself far enough that the row clears the footer.
+//
+// `handleInput.focus()` is not that scroll and never was. Focus scrolls the MINIMUM
+// amount, and "visible" to it means geometrically inside the scrollport — at 1280x700
+// the row sat at y 622..659 with the footer covering 605..660, i.e. fully inside the box
+// and fully underneath the button, so nothing moved (`scrollTop` 0). On touch there is
+// no focus call at all by design. Hence: measure the overlap against the footer's own
+// rect (no magic height — correct whether it is pinned or at its natural position, and
+// when it flex-wraps to two rows) and scroll by exactly that. `+=` self-clamps.
+//
+// Call it LAST in every path that shows or grows the row, including after the global
+// board renders: the board lands async, below the row, and re-caps the card's height.
+const overBtns = document.getElementById('overBtns');
+function revealNameRow() {
+  if (nameRow.style.display === 'none') return;
+  const overshoot = nameRow.getBoundingClientRect().bottom - overBtns.getBoundingClientRect().top;
+  if (overshoot > 0) overCard.scrollTop += overshoot;
+}
+
 handleInput.addEventListener('input', () => {
   // Uppercase so the stored/submitted value matches the CSS uppercase display —
   // the leaderboard renders the stored string, so they must agree.
@@ -3921,6 +3942,7 @@ function presentDeathSubmit(score, wave, token) {
   // Hide the previous run's board SYNCHRONOUSLY — gameOver() renders the card
   // immediately, so a second death would otherwise flash the last run's table.
   document.getElementById('overGlobal').style.display = 'none';
+  overCard.scrollTop = 0;   // every death opens on the recap, never mid-card (item 70)
 
   if (playerName) {
     // Returning player: submit straight away, exactly as before item 55. Its POST
@@ -3935,6 +3957,7 @@ function presentDeathSubmit(score, wave, token) {
     submitMsg.textContent = 'NAME YOURSELF TO JOIN THE BOARD';
     // No autofocus on touch — it throws the on-screen keyboard over the recap.
     if (!isTouch) handleInput.focus();
+    revealNameRow();   // after focus, so this scroll has the last word (item 70)
     fetchDeathRank(score, wave);
   }
 }
@@ -3970,6 +3993,7 @@ editNameBtn.addEventListener('click', () => {
   nameHint.style.display = ''; nameHint.textContent = 'APPLIES TO YOUR NEXT RUN';
   editNameBtn.style.display = 'none';
   if (!isTouch) handleInput.focus();
+  revealNameRow();   // EDIT opens the row BELOW a rendered board — same fold (item 70)
 });
 
 // Render the "You ranked #N of M" line + neon top-10 table from a POST response.
@@ -3995,6 +4019,10 @@ function renderGlobalBoard(data, name, score, wave) {
 
   body.innerHTML = BOARD_HEAD + boardRows(top, name, score, wave);
   global.style.display = '';
+  // The board is the one thing that grows the card AFTER the row is shown — a
+  // first-timer's rank GET resolves while they are reading. No-op for a returning
+  // player and once submitted — the row is hidden in both cases (item 70).
+  revealNameRow();
 }
 
 // Shared by the death screen and the title screen's attract loop (item 54).
@@ -4272,7 +4300,12 @@ window.__probe = {
            trailSegPool, waspTrailPool, rocketPool, enemyShotPool },
   // --- control ---
   fn: { startGame, resetGame, gameOver, startWave, showUpgrades, pickUpgrade, rerollUpgrades,
-        selectWeapon, reload, togglePause, damagePlayer, returnToTitle, awardMedal },
+        selectWeapon, reload, togglePause, damagePlayer, returnToTitle, awardMedal,
+        // Item 70 — `make playtest` is static (/api/scores 404s), so the death card's
+        // global board never renders on its own and the "does the name row survive the
+        // board landing under it?" case would go unchecked. This lets the layout
+        // scenario draw a synthetic board with no network.
+        renderGlobalBoard },
   setKey:  (code, down) => { keys[code] = !!down; },
   setFire: (v) => { mouseDown = !!v; },
   // Aim straight at a world point. Matches the forward vector animate() builds from

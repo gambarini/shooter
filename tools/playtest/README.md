@@ -43,7 +43,7 @@ Before believing any FPS number:
 | console / exceptions / failed requests | anything the page logged, including CSP violations |
 | frame times under shotgun spam | jank, stalls, and FPS/draw-call regression vs a local baseline |
 | **medal award / persistence** | a medal that re-toasts, does not persist, or a recap grid that mislabels earned vs unearned |
-| **card reachability at 1280x700 and 844x390** | a CTA that grew below the fold of its own scroll box — items 47/56/57 all hit this and none of them could fail a run on it |
+| **card reachability at 1280x700, 844x390 and 1280x950** | a CTA — or the death card's first-timer NAME row — that grew below the fold of its own scroll box, or under the sticky footer; items 47/56/57 all hit this and none of them could fail a run on it |
 
 The state diff is the one worth understanding: two snapshots are taken **in the same
 JavaScript turn as the button click that starts a run**, so both are exactly "t = 0 of a
@@ -107,7 +107,7 @@ To add a check, add a field to `SNAPSHOT` in `probes.mjs` and assert on it — t
 cheap path, and it is cheap on purpose. A new scenario is a file in `scenarios/`
 exporting a default `async (ctx) => {}` and a line in `SCENARIOS` in `run.mjs`.
 
-`layout` (item 67) is the other kind of extension: a scenario that changes the
+`layout` (items 67, 70) is the other kind of extension: a scenario that changes the
 *environment* rather than the game state. It drives `Emulation` through `ctx.send` — raw
 CDP, because a page cannot resize itself — and asserts that each card's primary button
 both hit-tests as itself and lies inside the viewport, then **clicks it with a dispatched
@@ -120,6 +120,25 @@ teardown — a leftover `isTouch === true` routes firing through `touchFire`, an
 later scenario would silently stop shooting. It runs last for the same reason `medals`
 does, and it leaves `.playtest/layout-*.png` behind for the aesthetic half no check can
 make.
+
+Item 70 added the death card's first-timer NAME row to the same treatment, and it is the
+better example of *what* to assert. The row is not sticky — it is visible only because
+`revealNameRow()` scrolls the card to it — so "inside the viewport" is not enough on its
+own: the pre-fix build had the row geometrically inside the scrollport and painted
+underneath `#overBtns`, which is why the assertion hit-tests `#handleInput` and
+`#submitName` rather than measuring a rectangle. Two supports it needed:
+
+- **`__probe.fn.renderGlobalBoard`** — the harness serves the site statically, so
+  `/api/scores` 404s and the death card's global board never renders. The half of the fix
+  that re-reveals the row *after* the board lands under it would therefore never execute
+  in a green run. The scenario draws a synthetic 10-row board through the probe and
+  re-asserts. When a check needs a code path the static server cannot produce, this is the
+  shape of the answer: one function on `__probe.fn`, not a live network.
+- **the 1280x950 leg** — a control, not a bug site. It is the height at which the card
+  fits, so it is what fails if a short-viewport fix ever starts scrolling a tall window.
+
+`--url` against the live site fails the NAME-row checks until the fix deploys; that is the
+lag between `main` and Pages, not a regression.
 
 Chrome's own window stays at `--window-size=1280,860` (`chrome.mjs`), and that is no
 longer a workaround for the title card: the frame-time sample is only comparable to a
