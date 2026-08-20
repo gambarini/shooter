@@ -173,6 +173,12 @@ Four things it must keep doing:
   the shutter is four simulated seconds — every telegraph the frame exists to show has
   already detonated, and you photograph the crater.
 
+It also runs one wave 10 with the regular spawn queue **left alone**. The isolation the
+other legs depend on is exactly what could hide a broken mini cap: a real boss wave queues
+20+ ordinary enemies beside the boss, so a ceiling counting the whole arena skips nearly
+every deployment in play while passing every isolated check. If you add a check that
+depends on an empty arena, ask what it would look like in a full one.
+
 Its `.playtest/boss-*.png` frames are the aesthetic half, same bargain as `layout`'s: the
 silhouette, the amber, and whether a ground telegraph reads as a warning are for a human.
 

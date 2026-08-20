@@ -2214,7 +2214,7 @@ const ART_OPENING = 3.6, ART_CD1 = 3.4, ART_CD2 = 2.2;
 // Firing range. The arena is 140 units across, so without this the boss shells you from a
 // corner you cannot even see it in — the fight has to be a fight, not weather.
 const ART_RANGE = 45;
-const ART_MINI_CD = 12, ART_MINI_CAP = 18;   // cap: a 12 s timer with no ceiling grows the wave forever
+const ART_MINI_CD = 12, ART_MINI_CAP = 8;   // cap: a 12 s timer with no ceiling grows the wave forever
 function spawnBoss(wave) {
   // Boss waves alternate: 5, 15, 25… melee; 10, 20, 30… ARTILLERY.
   const artillery = wave % 10 === 0;
@@ -3308,12 +3308,17 @@ function update(dt) {
         // while the shells own the ground. Capped, since they outlive the timer.
         e.miniCD -= dt;
         if (e.miniCD <= 0) {
-          e.miniCD = ART_MINI_CD;
-          if (enemies.length < ART_MINI_CAP) {
+          // The cap counts MINIS, not the arena. A boss wave still queues its 20+ regular
+          // spawns (startWave), so a ceiling on enemies.length would skip nearly every
+          // deployment in a real fight — and, since a skipped turn used to reset the full
+          // 12 s timer, one crowded moment cost 24 seconds. A skip retries in 2 s instead.
+          let minis = 0; for (const o of enemies) if (o.mini) minis++;
+          if (minis < ART_MINI_CAP) {
+            e.miniCD = ART_MINI_CD;
             const n = 2 + (Math.random() < 0.5 ? 1 : 0);
             for (let k = 0; k < n; k++) spawnMini(e.mesh.position, k, n);
             sfx.split();
-          }
+          } else e.miniCD = 2;
         }
       } else {
         // Lumbering approach + periodic radial volley aimed at the player.

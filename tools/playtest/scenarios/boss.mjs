@@ -99,12 +99,14 @@ export default async function boss(ctx) {
   // not END the run. At turbo 6 a 100 ms poll is ~3 s of simulated time, so topping a
   // 100 hp bar up between polls loses the race with a five-shell volley, and the fight
   // freezes on the death card halfway through the scenario.
-  const enterWave = async n => {
+  const enterWave = async (n, keepQueue = false) => {
     await ctx.eval(`const p = window.__probe;
       p.driven = true; p.turbo = ${ctx.cfg.turbo};
       p.fn.startGame(); p.fn.startWave(${n});
-      p.state.toSpawn = 0;
-      for (const e of [...p.enemies]) if (e.type !== 'boss') p.fn.damageEnemy(e, 1e9);
+      if (!${keepQueue}) {
+        p.state.toSpawn = 0;
+        for (const e of [...p.enemies]) if (e.type !== 'boss') p.fn.damageEnemy(e, 1e9);
+      }
       p.player.maxHp = 1e7; p.player.hp = 1e7;
       return true;`);
     return status();
@@ -234,6 +236,21 @@ export default async function boss(ctx) {
   // still be firing the volleys it always fired.
   ctx.check('the melee boss fires no mortars at all', meleeMarks === 0, `${meleeMarks} marks seen`);
   ctx.check('the melee boss still fires its volleys', meleeShots > 0, `${meleeShots} shots in the air`);
+
+  // ------------------------------------------------------------------ a crowded wave 10
+  // The isolation every check above depends on is also the thing that could hide a broken
+  // mini cap: a real wave 10 queues 21 regular spawns beside the boss, so a cap counting
+  // the whole arena would skip nearly every deployment and this leg would be the only
+  // place it showed. Run one wave 10 with its queue intact and make the minis prove they
+  // still arrive in a crowd.
+  await enterWave(10, true);
+  let crowd = 0;
+  await ctx.waitFor(`window.__probe.enemies.some(e => e.mini)`,
+                    { timeout: 90_000, poll: 200, label: 'minis to deploy into a full wave 10',
+                      onPoll: async () => { const t = await tickAlive(); crowd = Math.max(crowd, t.enemies); } });
+  s = await status();
+  ctx.check('minis still deploy on a real wave 10, with its own spawns in the arena',
+            s.minis >= 2 && crowd > 6, `${s.minis} minis with ${s.enemies} enemies alive (peak ${crowd})`);
 
   // Leave the page the way `medals` expects to find it. `perf` leaves the bot RUNNING and
   // `medals` quietly depends on that: with nobody dodging, its parked player dies to wave 1
