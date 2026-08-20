@@ -97,7 +97,12 @@ export default async function layout(ctx) {
     if (running) {
       // Opened for real through `__probe.fn`, then dismissed by taking the first card —
       // an upgrade screen faked by un-hiding the element measures an empty container.
-      const up = JSON.parse(await ctx.eval(`window.__probe.fn.showUpgrades();
+      // `showUpgrades` landed with this scenario, so a `--url` smoke of an older build
+      // (the live site mid-rollback, an older tag) has to skip it rather than throw an
+      // exception the harness would report as "the page logged an error".
+      const canUpgrade = await ctx.eval('return typeof window.__probe.fn.showUpgrades === "function";');
+      if (!canUpgrade) ctx.log(`${vp.name} — build predates __probe.fn.showUpgrades; upgrade screen not measured`);
+      const up = !canUpgrade ? null : JSON.parse(await ctx.eval(`window.__probe.fn.showUpgrades();
         const cards = [...document.querySelectorAll('#upcards .upcard')];
         const box = cards.map(c => c.getBoundingClientRect());
         const off = box.filter(r => r.top < 0 || r.bottom > innerHeight).length;
@@ -108,8 +113,8 @@ export default async function layout(ctx) {
         return JSON.stringify({ cards: cards.length, off, hits: hits.join(','),
           h: box.length ? Math.round(box[0].height) : 0, vh: innerHeight,
           rerollBottom: Math.round(reroll.bottom) });`));
-      ctx.log(`${vp.name} — upgrade screen: ${up.cards} card(s) ${up.h}px tall, ${up.off} clipped, ` +
-              `centres hit ${up.hits}, REROLL ends at y=${up.rerollBottom} of ${up.vh}`);
+      if (up) ctx.log(`${vp.name} — upgrade screen: ${up.cards} card(s) ${up.h}px tall, ${up.off} clipped, ` +
+                      `centres hit ${up.hits}, REROLL ends at y=${up.rerollBottom} of ${up.vh}`);
 
       await ctx.eval('window.__probe.fn.gameOver(); return true;');
       await ctx.waitFor(`!document.getElementById('overCard').classList.contains('hidden')`,
