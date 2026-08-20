@@ -80,6 +80,44 @@ async function nameRowReachable(ctx, vp, label) {
   if (vp.touch) ctx.check(`${vp.name}: ${label} does not autofocus (no on-screen keyboard)`, !nr.focused);
 }
 
+// Item 71 — what the sticky footer PAINTS, which the reachability checks above are blind
+// to: a band can be perfectly clickable and still have the leaderboard showing through it.
+// Two things must hold at once. While the card scrolls, the band is opaque (nothing behind
+// it stays legible) and its ramp — the `::before` strip ABOVE the band — is showing. While
+// it does not scroll, neither paints at all: that is item 67's property, and a fix for a
+// short viewport must not start smudging a tall one.
+//
+// Both are driven by one `scroll(nearest block)` timeline, and the ramp's lives on a
+// pseudo-element — so reading them in BOTH states is the only way to tell a timeline that
+// resolved from a rule that simply never applied (which also looks like "opacity 0, no
+// band"). The tail check below fails the scenario if the run never saw both states.
+async function bandPaint(ctx, vp, label, rowSel, cardId) {
+  const b = JSON.parse(await ctx.eval(`const r = document.querySelector('${rowSel}');
+    const c = document.getElementById('${cardId}');
+    if (!r || !c) return JSON.stringify({ found: false });
+    const cs = getComputedStyle(r), ramp = getComputedStyle(r, '::before');
+    return JSON.stringify({ found: true, bg: cs.backgroundColor, img: cs.backgroundImage,
+      ramp: Number(ramp.opacity), rampH: ramp.height,
+      sh: c.scrollHeight, ch: c.clientHeight, overflows: c.scrollHeight > c.clientHeight + 1 });`));
+  if (!b.found) { ctx.check(`${vp.name}: ${label} exists`, false); return null; }
+  ctx.log(`${vp.name} — ${label}: ${b.sh}px of content in ${b.ch}px, band ${b.bg} / ${b.img}, ` +
+          `ramp ${b.rampH} at opacity ${b.ramp}`);
+  const painted = `background ${b.bg} / ${b.img}`;
+  if (b.overflows) {
+    // `rgb(...)` with no alpha channel is the only fully opaque form; a gradient would
+    // come back as background-image, which is how the pre-fix build let text through.
+    ctx.check(`${vp.name}: ${label} band is opaque while the card scrolls`,
+              /^rgb\([^)]*\)$/.test(b.bg) && b.img === 'none', painted);
+    ctx.check(`${vp.name}: ${label} fade ramp is showing`, b.ramp === 1, `opacity ${b.ramp}`);
+  } else {
+    ctx.check(`${vp.name}: ${label} paints no band when nothing overflows`,
+              b.bg === 'rgba(0, 0, 0, 0)' && b.img === 'none', painted);
+    ctx.check(`${vp.name}: ${label} paints no ramp when nothing overflows`, b.ramp === 0,
+              `opacity ${b.ramp}`);
+  }
+  return b;
+}
+
 // A REAL click, at the coordinates the hit test just measured. `el.click()` is not a
 // substitute and this scenario is the proof: on the pre-fix build the synthetic call
 // still started a run with the button 100px below the viewport, so only a dispatched
@@ -92,6 +130,7 @@ async function clickAt(ctx, r) {
 }
 
 export default async function layout(ctx) {
+  const bands = [];
   for (const vp of VIEWPORTS) {
     await ctx.send('Emulation.setDeviceMetricsOverride',
                    { width: vp.width, height: vp.height, deviceScaleFactor: 1, mobile: vp.touch });
@@ -110,6 +149,7 @@ export default async function layout(ctx) {
 
     // ---------------------------------------------------------------- title card
     const startRect = await reachable(ctx, vp.name, '#startBtn');
+    bands.push(await bandPaint(ctx, vp, 'title footer', '#startRow', 'startCard'));
     await shot(ctx, `title-${vp.width}x${vp.height}`);
 
     // The hit test says the pixel belongs to the button; this says the game actually
@@ -151,6 +191,7 @@ export default async function layout(ctx) {
       await reachable(ctx, vp.name, '#againBtn');
       await reachable(ctx, vp.name, '#titleBtn');
       await nameRowReachable(ctx, vp, 'first-timer name row');
+      bands.push(await bandPaint(ctx, vp, 'death footer', '#overBtns', 'overCard'));
       await shot(ctx, `death-${vp.width}x${vp.height}`);
 
       // …and again once the global board lands UNDER the row. `make playtest` is
@@ -167,11 +208,18 @@ export default async function layout(ctx) {
           return true;`);
         await sleep(150);
         await nameRowReachable(ctx, vp, 'name row survives the board');
+        bands.push(await bandPaint(ctx, vp, 'death footer under the board', '#overBtns', 'overCard'));
         await shot(ctx, `death-board-${vp.width}x${vp.height}`);
       }
       await ctx.eval('window.__probe.fn.returnToTitle(); return true;');
     }
   }
+
+  // Without both states the bandPaint checks above are vacuous — see its header.
+  const seen = bands.filter(Boolean);
+  ctx.check('sticky footer measured both scrolling and fitting',
+            seen.some(b => b.overflows) && seen.some(b => !b.overflows),
+            `${seen.filter(b => b.overflows).length} scrolling / ${seen.filter(b => !b.overflows).length} fitting`);
 
   // ---------------------------------------------------------------- teardown
   await ctx.send('Emulation.clearDeviceMetricsOverride');

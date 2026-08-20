@@ -177,7 +177,9 @@
        • the sticky footers below — the button rides the bottom of the scroll box. */
   #overCard, #startCard { max-height:94vh; max-height:94dvh; overflow-y:auto; touch-action:pan-y; }
   .card.hidden { display:none; }
-  .verbadge { position:absolute; bottom:6px; right:14px; font-size:11px; letter-spacing:1px;
+  /* z-index over the sticky footer's opaque plate (item 71): the badge is absolute to the
+     card's CONTENT box, so at the bottom of a scrolled card it lands under the band. */
+  .verbadge { position:absolute; z-index:3; bottom:6px; right:14px; font-size:11px; letter-spacing:1px;
               color:#6fa8c9; text-shadow:0 0 6px rgba(0,240,255,.6), 0 0 10px rgba(255,46,136,.3);
               opacity:.75; pointer-events:none; }
   h1 { font-size: 64px; font-weight: 900; letter-spacing: 6px; line-height: 1;
@@ -238,12 +240,28 @@
      nothing passing behind the button and a dark band there is just a smudge. A scroll()
      timeline is the CSS-only way to ask "does my scroll container have overflow?": with
      none, the timeline is inactive and the animation never applies, so the row stays
-     transparent. Both keyframes are identical, so when it IS scrollable the fade is a
+     transparent. Both keyframes are identical, so when it IS scrollable the paint is a
      constant, not an animation. Browsers without scroll-driven animations just never paint
      it — the button is still sticky and still clickable, which is the part that matters.
      `animation-timeline` must stay AFTER the shorthand, which resets it to `auto`. */
-  @keyframes cardFade { from, to { background:linear-gradient(to top, rgba(5,8,16,.93) 52%, rgba(5,8,16,0)); } }
+  @keyframes cardFade { from, to { background:rgb(5,8,16); } }
+  @keyframes cardFadeRamp { from, to { opacity:1; } }
   #startRow, #overBtns { animation:cardFade linear both; animation-timeline:scroll(nearest block); }
+  /* Item 71 — the band is OPAQUE edge to edge and the ramp lives ABOVE it, in a ::before
+     that costs no layout. Painting the ramp INSIDE the band (the old `.93 52%` stop) left
+     its whole upper half translucent — and that half is the 22px of padding, i.e. exactly
+     where content passes closest to the button text: leaderboard rows and medal hints
+     stayed legible right beside RUN IT BACK. Same timeline on the ramp, so a card that
+     does not overflow still paints neither plate nor ramp; and `pointer-events:none`
+     keeps the strip above the band from stealing taps from the name row underneath it.
+     The ramp is deliberately SHORT and falls off fast: the last thing above the footer is
+     usually item 70's NAME row, flush against it, so a long soft fade does not soften an
+     edge — it dims a live input. 20px is enough to kill the razor line and no more. */
+  #startRow::before, #overBtns::before {
+    content:''; position:absolute; left:0; right:0; bottom:100%; height:20px; opacity:0;
+    pointer-events:none;
+    background:linear-gradient(to top, rgb(5,8,16), rgba(5,8,16,.32) 55%, rgba(5,8,16,0));
+    animation:cardFadeRamp linear both; animation-timeline:scroll(nearest block); }
   #titleBtn { color:#9fe9ff; background:rgba(0,240,255,.07); border:1px solid rgba(0,240,255,.35);
               padding:15px 30px; box-shadow:0 0 14px rgba(0,240,255,.18); }
   #titleBtn:hover { color:#dff8ff; background:rgba(0,240,255,.14); box-shadow:0 0 24px rgba(0,240,255,.45); }

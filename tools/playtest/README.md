@@ -44,6 +44,7 @@ Before believing any FPS number:
 | frame times under shotgun spam | jank, stalls, and FPS/draw-call regression vs a local baseline |
 | **medal award / persistence** | a medal that re-toasts, does not persist, or a recap grid that mislabels earned vs unearned |
 | **card reachability at 1280x700, 844x390 and 1280x950** | a CTA — or the death card's first-timer NAME row — that grew below the fold of its own scroll box, or under the sticky footer; items 47/56/57 all hit this and none of them could fail a run on it |
+| **sticky footer paint, in both states** | a footer band that lets the content behind it stay legible while the card scrolls — or that paints at all on a window where nothing overflows (item 67's property) |
 
 The state diff is the one worth understanding: two snapshots are taken **in the same
 JavaScript turn as the button click that starts a run**, so both are exactly "t = 0 of a
@@ -107,7 +108,7 @@ To add a check, add a field to `SNAPSHOT` in `probes.mjs` and assert on it — t
 cheap path, and it is cheap on purpose. A new scenario is a file in `scenarios/`
 exporting a default `async (ctx) => {}` and a line in `SCENARIOS` in `run.mjs`.
 
-`layout` (items 67, 70) is the other kind of extension: a scenario that changes the
+`layout` (items 67, 70, 71) is the other kind of extension: a scenario that changes the
 *environment* rather than the game state. It drives `Emulation` through `ctx.send` — raw
 CDP, because a page cannot resize itself — and asserts that each card's primary button
 both hit-tests as itself and lies inside the viewport, then **clicks it with a dispatched
@@ -136,6 +137,16 @@ underneath `#overBtns`, which is why the assertion hit-tests `#handleInput` and
   shape of the answer: one function on `__probe.fn`, not a live network.
 - **the 1280x950 leg** — a control, not a bug site. It is the height at which the card
   fits, so it is what fails if a short-viewport fix ever starts scrolling a tall window.
+
+Item 71 added `bandPaint`, which is about what the footer PAINTS rather than what it can
+reach: while the card scrolls the band must be fully opaque (`rgb(...)`, no
+background-image — a gradient is how the pre-fix build let leaderboard rows show through
+beside RUN IT BACK) and its fade ramp must be showing; while it does not scroll, neither
+may paint at all. Both are driven by one `scroll(nearest block)` timeline and the ramp's
+lives on a `::before`, so the check reads `getComputedStyle(row, '::before')` in **both**
+states and a tail check fails the scenario if a run only ever saw one of them — "opacity
+0, no band" is also what a rule that never applied looks like, and a single-state check
+could not tell the two apart.
 
 `--url` against the live site fails the NAME-row checks until the fix deploys; that is the
 lag between `main` and Pages, not a regression.
