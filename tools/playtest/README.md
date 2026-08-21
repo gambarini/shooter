@@ -360,3 +360,5 @@ so the live bundle gains only the ~1.5KB test API — which is deliberate: it is
 `--url` smoke-test the deployed site. The Chrome profile and `.playtest/` are gitignored,
 and the perf baseline is machine-local because an FPS number from one machine is not a
 threshold for another.
+
+<!-- throwaway line for the item-66 CI self-test PR; this branch is never merged -->
