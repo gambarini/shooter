@@ -1355,7 +1355,7 @@ if (isTouch) document.body.classList.add('touch');
 // `driven` means "an automated driver holds the controls": firing stops requiring
 // pointer lock (synthetic play never gets it) and the blur/visibility/unlock auto-pauses
 // stand down, since an unattended run must not pause itself into a hang.
-const probe = { turbo: 1, driven: false };
+const probe = { turbo: 1, driven: false, fixedDt: null };
 
 const keys = {};
 let pointerLocked = false;
@@ -3900,7 +3900,15 @@ const fpsEl = document.getElementById('fps');
 let fpsFrames = 0, fpsTime = 0, slowmoOn = false;
 function animate() {
   requestAnimationFrame(animate);
-  const raw = Math.min(0.05, clock.getDelta());
+  // Item 79 — `probe.fixedDt` replaces the wall clock with a fixed step, and 0 freezes the
+  // sim outright: update() still runs (so a camera the harness just moved is still applied)
+  // but no clock advances. It exists because pinning state.time and envTime from outside was
+  // not enough for the visual A/B — the pin lands in one CDP round-trip and the capture in
+  // the next, so an unknown number of frames, each adding its own dt, ran in between, and
+  // the frame photographed was a function of how many. getDelta() is called either way, so
+  // the Clock never banks the frozen span and hands it back as one huge dt on release.
+  const real = Math.min(0.05, clock.getDelta());
+  const raw = probe.fixedDt === null ? real : probe.fixedDt;
   let dt = raw;
   if (state.slowmo > 0) { state.slowmo -= raw; dt = raw * 0.3; }   // boss-kill slow-mo
   const slow = state.slowmo > 0;                                   // speed-line overlay (item 27)
@@ -4513,6 +4521,10 @@ window.__probe = {
   set turbo(v)   { probe.turbo = Math.max(1, Math.min(8, v | 0)); },
   get driven()   { return probe.driven; },
   set driven(v)  { probe.driven = !!v; },
+  // null = the real wall clock. A number is the dt every frame gets instead; 0 freezes the
+  // sim so a frame can be photographed twice and be the same picture (see animate()).
+  get fixedDt()  { return probe.fixedDt; },
+  set fixedDt(v) { probe.fixedDt = v === null ? null : Math.max(0, Math.min(0.05, +v || 0)); },
   // --- live game objects ---
   state, player, scene, renderer, camera, settings, weapons, enemies,
   get mods()          { return mods; },

@@ -123,6 +123,7 @@ re-record it with `--save-baseline` rather than loosening the 0.8 tolerance.
     make playtest ARGS="--waves 6 --turbo 8"  a longer soak
     make playtest ARGS="--scenario perf"      one scenario (default: soak,chaos,perf,boss,medals,layout)
     make playtest ARGS="--scenario ab --baseline v0.21.5"   diff the frame against a git ref
+    make playtest ARGS="--scenario ab --save-poses"        write the six poses even on a pass
     make playtest ARGS="--save-baseline"      record this machine's perf numbers
     make playtest ARGS="--headless"           SwiftShader: logic and leaks only, FPS meaningless
     make playtest ARGS="--no-sandbox"        drop Chrome's sandbox — CI containers only
@@ -258,16 +259,30 @@ Five things it must keep doing:
   clears wave 1 on the first frame and slides the upgrade screen over every pose — at a
   wall-clock moment that differs between the two builds. That was worth ~18 MAD of pure
   noise before it was found.
-- **Pin both clocks the frame is a function of**: `state.time` (the grid shader's pulse)
+- **Stop every clock the frame is a function of**: `state.time` (the grid shader's pulse)
   and `envTime`, which `__probe.fn.resetEnv` zeroes along with the trim, cap and dust state
   it drives. `updateEnv` breathes every wall trim by +/-38% on a ~7 s cycle, accumulating
   from page load and never reset mid-run, so two builds photographed from the same camera
   differ by whatever phase each page was at. Note what does NOT work: `state.paused` freezes
   almost none of this, because `updateEnv` and `updateAttract` are called outside the
-  running/paused gate on purpose. Pinning took the noise floor from 0.25 MAD to 0.005.
-  A baseline ref older than item 65 has no `resetEnv` on its probe; the call is guarded and
-  the run says so, because a marginal score against an unpinned baseline must not read as a
-  clean one.
+  running/paused gate on purpose. Pinning took the noise floor from 0.25 MAD to 0.005 —
+  and **`__probe.fixedDt = 0` (item 79) took the remaining 0.005 to exactly 0.000**, because
+  a pin is not a stop: it lands in one CDP round-trip and the capture in the next, so an
+  unknown number of frames each added its own `dt` and the frame photographed was a function
+  of how many. Set the pin and the freeze in the SAME eval; split across two, the residual
+  is a ~5 ms clock skew and a floor back at 0.005. The signature carries `state.time` for
+  exactly this reason, and the run asserts the two captures agree on it.
+- **Both builds run in the same mode, pinned or unpinned — never one of each.** A ref older
+  than `probe.fixedDt` cannot hold its clocks, and pinning only the build under test is
+  *worse than pinning neither*: it puts A at phase 0 and B at whatever phase it reached, and
+  `--baseline v0.20.0` scored up to **1.125 MAD** on that asymmetry alone — a red check on a
+  frame nothing had changed. Unpinned on both sides, the same comparison scores 0.07-0.40
+  with a floor of 0.12, because two pages photographed on the same capture schedule reach
+  the same phase by construction. That is also why **every** capture starts from a fresh
+  page load: unpinned, the arena clock counts from load, so two captures agree only if their
+  pages are the same age at the same pose. The mode is chosen from the baseline's SOURCE,
+  before the floor is measured — the floor has to be measured in the mode the comparison
+  will use — and the loaded page then has to confirm what its source advertised.
 - **Assert the mean AND the worst tile**, because the two kinds of visual change do not
   look alike in one number. A global change moves the whole frame a little — bloom off
   scores 5-12 MAD — and the mean catches it. A LOCAL change moves a few tiles a lot and
@@ -275,18 +290,26 @@ Five things it must keep doing:
   under any threshold the noise permits, while shifting its worst tile by 12-32. Assert
   only the mean and every recolour walks through; assert only the tile and one drifting
   dust mote fails the run. The tile half is skipped against a baseline too old to pin its
-  arena clock, where the unpinned floor's own worst tiles reach 45-75.
+  arena clock: measured against `v0.20.0`, the unpinned floor's own worst tiles run 13-17
+  and its poses reach 26. The floor check skips its tile half there too — demanding headroom
+  on a number nothing goes on to assert is how a run goes red over nothing.
 - **Measure the floor, never assume it.** A vs A runs first, every time, and the run fails
   if either floor climbs within `FLOOR_MARGIN` of its threshold. Both thresholds came from
   measurement, not taste: fully pinned, A-vs-A is 0.004 MAD with a worst tile of 0.3, so
   1.0 and 4.0 sit ~250x and ~13x above the floor and ~3x under the smallest change worth
-  catching. Pick a new pose the same way — the steep look-down this scenario shipped with
+  catching. **Look at the poses** (`--save-poses` writes all six on a pass) rather than
+  trusting them: item 65's original six were never eyeballed, and item 79 found four of them
+  photographing the inside of the pillar at the arena origin — `centre-east` was a flat pink
+  interior face, no grid, no trim, no sky. A frame that cannot change is a check that can
+  never fail. Pick a new pose the same way — the steep look-down this scenario shipped with
   scored 0.00 against a recoloured grid, because from eye height you see three antialiased
   lines and a lot of dark floor and a 16x16 average erases them. A pose earns its place by
   seeing MORE of the thing it is there for, not by being prettier.
 
 PNGs land in `.playtest/ab-*.png` on failure only — `-baseline` is the ref, `-current` is
-the working tree. The number says something changed; the picture says what.
+the working tree. The number says something changed; the picture says what. `--save-poses`
+additionally writes `ab-pose-<name>.png` for all six on a pass, from the build under test;
+that is for reviewing what the poses frame, not for diffing.
 
 `boss` (item 45) is the third shape: a scenario about a fight the ordinary run never
 reaches. The soak clears four waves and dies, so wave 5 and wave 10 were unverified

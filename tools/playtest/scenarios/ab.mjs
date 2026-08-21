@@ -30,7 +30,14 @@
 //   nondeterminism you never measured is a threshold that starts crying wolf on somebody
 //   else's machine. Note that `state.paused` would freeze almost none of that noise:
 //   `updateEnv` and `updateAttract` are called OUTSIDE the running/paused gate on purpose
-//   ("the arena idles alive"). Pinning the two clocks in `pose()` is what actually works.
+//   ("the arena idles alive"). Stopping the clocks in `pose()` is what actually works — and
+//   the floor must be measured in the SAME mode the comparison will run in, which is why the
+//   baseline's mode is read from its source before any capture happens.
+//
+// And one the poses themselves cost an item to learn: **look at what a pose frames.** The
+// original six were chosen for coverage on paper and never eyeballed; four of them stood
+// inside the pillar at the arena origin and photographed its interior face. `--save-poses`
+// writes all six on a pass, and that review is now part of changing one.
 //
 // PNGs are written on failure only: the number says something changed, the picture says
 // what. On a pass they would be six identical frames of an empty arena.
@@ -57,34 +64,52 @@ const N = 16;                 // tiles per side; 768 numbers per signature
 // you miss every recolour; assert the worst tile and a single drifting dust mote fails the
 // run. So: both, each tuned against the measured floor.
 //
-// Fully pinned (both builds carrying __probe.fn.resetEnv), A-vs-A measures 0.004 MAD with
-// a worst tile of 0.3 — so 1.0 and 4.0 sit roughly 250x and 13x above the floor, and 3x
-// under the smallest change worth catching. Against an UNPINNED baseline the floor rises
-// to ~0.5 MAD with worst tiles of 45-75, which is why the tile assertion is made only when
-// the baseline can pin its own arena clock: it would otherwise fail on pure phase.
+// Fully pinned (both builds carrying __probe.fixedDt, item 79), A-vs-A measures 0.000 MAD
+// with a worst tile of 0.0 — the frame is frozen, so the two captures are the same picture,
+// not merely a similar one. 1.0 and 4.0 therefore sit entirely above the floor and ~3x under
+// the smallest change worth catching. Against a baseline too old to freeze, BOTH builds run
+// unpinned (see `pose`) and the floor rises to ~0.12 MAD with worst tiles of 13-17, which is
+// why the tile assertion is made only when both builds can hold their clocks.
 const THRESHOLD = 1.0;        // mean absolute difference, 0..255 per channel
 const TILE_THRESHOLD = 4.0;   // ...and no single tile may move more than this
 const FLOOR_MARGIN = 4;       // A-vs-A must stay this many times under both
 
 // Fixed poses. The player stands still in an empty arena and looks at a named point, so
-// the same pose is the same picture on any build: the four walls from the centre (trims,
-// mood lighting, dust), a shallow sweep down the receding grid, and the spawn corner
-// looking back across the whole arena (everything at once, at depth).
+// the same pose is the same picture on any build: the four walls from near the centre
+// (trims, mood lighting, dust), a shallow sweep down the receding grid, and the spawn
+// corner looking back across the whole arena (everything at once, at depth).
+//
+// **Stand at z = 12, not at the origin** (item 79). The arena's pillar list opens with
+// `[0, 0, 8, 6, 8]` — an 8x8 pillar 6 units tall, centred on the origin — so an eye at
+// (0, 1.7, 0) is INSIDE it. That was the first five poses' real subject: `centre-east`
+// photographed a flat pink interior face and nothing else, no grid, no trim, no sky, and
+// three of the others spent 40% of the frame on it. A check whose frame cannot change is a
+// check that can never fail, and it was also photographing a place the game never renders
+// in play, since obstacle collision keeps a real player out of that box. Twelve units north
+// is the nearest spot clear of every pillar (the next is `[18, 20]`, and `[6, -38]`),
+// keeps all four compass sightlines, and hands `centre-south` a pillar and its cap at a
+// legible 8 units — the one subject the old poses only ever saw from the inside.
 //
 // `floor-sweep` is shallow on purpose. A steep look straight down scores ~0.00 against a
 // recoloured grid, because from eye height you see two or three antialiased lines and a
 // lot of dark floor, and a 16x16 average erases them. Looking down the length of the grid
 // puts hundreds of lines in the frame, which is what makes the grid shader assertable at
-// all. If a pose ever has to be replaced, replace it with one that sees MORE of the thing
-// it is there for, not a prettier angle.
+// all. It sweeps SOUTH while `centre-north` looks north for the same reason: from z = 12
+// the origin pillar sits 8 units up the northward sightline and would take the middle
+// third of the frame — grid the sweep exists to count. North keeps it (a pillar and its
+// lit cap at a legible distance is worth one pose), south is the clear run.
+// If a pose ever has to be replaced, replace it with one that sees MORE of the thing
+// it is there for, not a prettier angle — and then LOOK at it (`--save-poses`), because
+// that is the check the first six never got.
 const ARENA = 70;
+const EYE_Z = 12;
 const POSES = [
-  { name: 'centre-north', at: [0, 0],    look: [0, 2, -ARENA] },
-  { name: 'centre-east',  at: [0, 0],    look: [ARENA, 2, 0] },
-  { name: 'centre-south', at: [0, 0],    look: [0, 2, ARENA] },
-  { name: 'centre-west',  at: [0, 0],    look: [-ARENA, 2, 0] },
-  { name: 'floor-sweep',  at: [0, 0],    look: [0, -3, -26] },
-  { name: 'spawn-corner', at: [40, 40],  look: [-ARENA, 4, -ARENA] },
+  { name: 'centre-north', at: [0, EYE_Z],  look: [0, 2, -ARENA] },
+  { name: 'centre-east',  at: [0, EYE_Z],  look: [ARENA, 2, 0] },
+  { name: 'centre-south', at: [0, EYE_Z],  look: [0, 2, ARENA] },
+  { name: 'centre-west',  at: [0, EYE_Z],  look: [-ARENA, 2, 0] },
+  { name: 'floor-sweep',  at: [0, EYE_Z],  look: [0, -3, EYE_Z + 26] },
+  { name: 'spawn-corner', at: [40, 40],    look: [-ARENA, 4, -ARENA] },
 ];
 
 // Set up a run that will never move: no spawn queue, no pickup timer, the player parked.
@@ -101,23 +126,35 @@ const ARM = `const p = window.__probe;
   p.player.maxHp = 1e7; p.player.hp = 1e7;
   return true;`;
 
-const pose = pz => `const p = window.__probe;
+// `hold` places the camera; `pin` additionally stops every clock the frame is a function of
+// — state.time (the grid shader's 0.85 + 0.15*sin(t) pulse), envTime (a +/-38% breath on
+// every wall trim, accumulating from page load), and then `fixedDt = 0` so neither advances
+// again before the capture. The pin is applied ONLY in the same eval as the freeze: pinning
+// in one CDP round-trip and freezing in the next leaves however many frames ran in between,
+// and the residual showed up as a 5 ms clock skew and a 0.005 MAD floor.
+//
+// Both builds always run in the SAME mode, which is the point (item 79). Pinning the build
+// under test while the baseline's env clock ran free was worse than pinning neither: the
+// asymmetry put A at phase 0 and B at whatever phase it had reached, worth up to 1.1 MAD on
+// a trim-heavy pose — a red check on nothing. Two unpinned pages photographed on the same
+// capture schedule land on the same phase by construction, and measure 0.004.
+const pose = (pz, pin) => `const p = window.__probe;
   ${HOLD}
-  // Pin BOTH clocks the frame is a function of. state.time drives the grid shader's pulse;
-  // envTime (which resetEnv zeroes, along with the trim, cap and dust state it feeds)
-  // drives a +/-38% breath on every wall trim, accumulating from page load and never reset
-  // mid-run. Leave envTime alone and the spawn-corner pose scores 0.1-0.25 MAD against an
-  // identical build purely on which phase each page happened to be at.
-  // Guarded: a baseline ref older than this item has no resetEnv on its probe, and a
-  // scenario whose whole job is comparing against old builds must not throw on one. The
-  // comparison just runs at the higher, unpinned floor then — reported below, so a
-  // marginal score against an old ref is never mistaken for a clean one.
-  if (p.fn.resetEnv) p.fn.resetEnv();
+  ${pin ? `p.fn.resetEnv();
   p.state.time = ${PIN_TIME};
+  p.fixedDt = 0;` : '// unpinned: the baseline cannot hold its clocks, so this build does not either'}
   p.player.pos.x = ${pz.at[0]}; p.player.pos.z = ${pz.at[1]};
   p.player.vel.set(0, 0, 0);
   p.lookAt(${pz.look[0]}, ${pz.look[1]}, ${pz.look[2]});
   return true;`;
+
+// Returns the 768 numbers AND the clock the frame was drawn at (item 79). The clock is
+// what tells a floor failure apart from a real one: two captures of the same build that
+// disagree while `time` matches are a genuine nondeterminism, and two that disagree with
+// `time` apart are just a frame that got an extra `dt` between the pin and the read.
+// Let the clocks run again — the next pose has to be able to settle.
+const THAW = `const p = window.__probe;
+  if ('fixedDt' in p) p.fixedDt = null; return true;`;
 
 const SIGNATURE = `
   const src = window.__probe.renderer.domElement;
@@ -131,7 +168,7 @@ const SIGNATURE = `
     for (let i = 0; i < ${N} * ${N}; i++) {
       out[i * 3] = d[i * 4]; out[i * 3 + 1] = d[i * 4 + 1]; out[i * 3 + 2] = d[i * 4 + 2];
     }
-    res(out);
+    res({ px: out, time: window.__probe.state.time });
   }));`;
 
 // Mean absolute difference across all 768 channels, plus the tile that moved most — a
@@ -140,11 +177,12 @@ function compare(a, b) {
   let sum = 0, worst = { tile: -1, delta: 0 };
   for (let i = 0; i < N * N; i++) {
     let tile = 0;
-    for (let c = 0; c < 3; c++) { const d = Math.abs(a[i * 3 + c] - b[i * 3 + c]); sum += d; tile += d; }
+    for (let c = 0; c < 3; c++) { const d = Math.abs(a.px[i * 3 + c] - b.px[i * 3 + c]); sum += d; tile += d; }
     tile /= 3;
     if (tile > worst.delta) worst = { tile: i, delta: tile };
   }
   return { mad: sum / (N * N * 3), worstTile: worst.tile, worstDelta: worst.delta,
+           clockSkew: Math.abs(a.time - b.time),
            worstAt: worst.tile < 0 ? 'no tile moved at all'
                                    : `col ${worst.tile % N}, row ${Math.floor(worst.tile / N)} of ${N}` };
 }
@@ -155,15 +193,19 @@ async function goto(ctx, url, label) {
   await ctx.eval('window.__probe.driven = true; window.__probe.turbo = 1; return true;');
 }
 
-// Every pose, on whatever build is currently loaded.
-async function capture(ctx) {
+// Every pose, on whatever build is currently loaded. `save` writes each frame to
+// .playtest/ (--save-poses) — a pose that frames nothing is a check that can never fail,
+// and the only way to know which is which is to look (item 79).
+async function capture(ctx, { pin, save = false } = {}) {
   await ctx.eval(ARM);
   const sigs = {};
   for (const pz of POSES) {
-    await ctx.eval(pose(pz));
-    await sleep(120);                 // let the camera, the gun sway and the mood settle
-    await ctx.eval(pose(pz));         // re-pin state.time immediately before the capture
+    await ctx.eval(pose(pz, false));   // place the camera with the sim still running...
+    await sleep(120);                  // ...so the camera, the gun sway and the mood settle
+    await ctx.eval(pose(pz, pin));     // then pin + freeze, in one turn
+    if (save) await shoot(ctx, `pose-${pz.name}`);
     sigs[pz.name] = await ctx.eval(SIGNATURE, { awaitPromise: true });
+    if (pin) await ctx.eval(THAW);
   }
   return sigs;
 }
@@ -198,6 +240,16 @@ export default async function ab(ctx) {
   }
   ctx.check(`ab: baseline ref ${ref} resolves`, true, `${(baselineSrc.length / 1024).toFixed(0)}KB of index.html`);
 
+  // Which mode both builds will run in, decided from the baseline SOURCE because the A-vs-A
+  // floor is measured before the baseline is ever loaded — and it has to be measured in the
+  // mode the comparison will use, or it characterises something else. `probe.fixedDt` is the
+  // marker: it arrived (item 79) after `__probe.fn.resetEnv` (item 65), so a build carrying
+  // it carries both pins. The runtime confirms it below; a marker that lies fails the run.
+  const pinned = baselineSrc.includes('probe.fixedDt');
+  if (!pinned) ctx.log(`baseline ${ref} predates __probe.fixedDt, so NEITHER build pins its clocks ` +
+                       `for this run — symmetric and unpinned beats pinned-vs-unpinned, which scored ` +
+                       `up to 1.1 MAD on phase alone. No tile assertion at this floor.`);
+
   const dir = join(OUT, 'ab-baseline');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'index.html'), baselineSrc);
@@ -205,17 +257,37 @@ export default async function ab(ctx) {
 
   try {
     // --- A, then A again: the noise floor ------------------------------
-    const a1 = await capture(ctx);
+    // Freshly loaded for BOTH captures, not just the second. Unpinned, the arena idle clock
+    // accumulates from page load, so two captures line up on phase only if their pages are
+    // the same age at the same pose — a1 taken on the page the runner happened to leave
+    // booted, against a2 taken after a reload, measured 0.219 MAD of pure age difference.
     await goto(ctx, ctx.url, 'the working tree');
-    const a2 = await capture(ctx);
+    const a1 = await capture(ctx, { pin: pinned, save: cfg.savePoses });
+    await goto(ctx, ctx.url, 'the working tree');
+    const a2 = await capture(ctx, { pin: pinned });
     const floors = POSES.map(pz => compare(a1[pz.name], a2[pz.name]));
     const floor = Math.max(...floors.map(f => f.mad));
     const floorTile = Math.max(...floors.map(f => f.worstDelta));
+    // The floor has to clear the assertions that will actually be MADE. Unpinned, the tile
+    // assertion is skipped below, so demanding tile headroom here would fail a run on a
+    // number nothing goes on to use.
     ctx.check('ab: the same build twice scores at the noise floor',
-              floor * FLOOR_MARGIN < THRESHOLD && floorTile * FLOOR_MARGIN < TILE_THRESHOLD,
+              floor * FLOOR_MARGIN < THRESHOLD && (!pinned || floorTile * FLOOR_MARGIN < TILE_THRESHOLD),
               `worst pose ${floor.toFixed(3)} MAD / tile ${floorTile.toFixed(1)}, ` +
-              `thresholds ${THRESHOLD} / ${TILE_THRESHOLD} (needs ${FLOOR_MARGIN}x headroom)`);
+              `thresholds ${THRESHOLD} / ${pinned ? TILE_THRESHOLD : 'n/a (unpinned)'} ` +
+              `(needs ${FLOOR_MARGIN}x headroom)`);
     ctx.log(`noise floor per pose: ${POSES.map((pz, i) => `${pz.name} ${floors[i].mad.toFixed(3)}`).join(' · ')}`);
+    // Item 79: the clock is the discriminator, so it is read on every run and not only on a
+    // red one. Frozen, any skew at all means the freeze did not hold and the floor above is
+    // measuring elapsed time rather than nondeterminism — which is what it was measuring for
+    // four items. Unfrozen (an old baseline), skew is expected and is reported, not asserted.
+    const skew = Math.max(...floors.map(f => f.clockSkew));
+    if (pinned) {
+      ctx.check('ab: both captures of the same build were drawn at the same sim clock',
+                skew === 0, `worst state.time skew ${skew.toExponential(2)}s across ${POSES.length} poses`);
+    } else {
+      ctx.log(`unpinned mode: worst state.time skew between the two captures ${skew.toFixed(3)}s`);
+    }
 
     // --- B: the baseline, on its own port ------------------------------
     baselineServer = await serve(dir);
@@ -226,10 +298,16 @@ export default async function ab(ctx) {
                 `__probe.version=${version} — the ref predates the harness, pick a newer one`);
       return;
     }
-    const pinned = await ctx.eval('return typeof window.__probe.fn.resetEnv === "function";');
-    if (!pinned) ctx.log(`baseline ${ref} predates __probe.fn.resetEnv — its arena idle clock ` +
-                         `(wall-trim breath, dust) runs free, so expect a floor nearer 0.25 than 0.00 below`);
-    const b = await capture(ctx);
+    // The source-read above decided the mode; the loaded page confirms it. If these ever
+    // disagree the A-vs-A floor was measured in a different mode from the comparison, which
+    // is exactly the kind of quiet mismatch this scenario exists to make loud.
+    const canPin = await ctx.eval(`const p = window.__probe;
+      return typeof p.fn.resetEnv === 'function' && ('fixedDt' in p);`);
+    ctx.check(`ab: baseline ${ref} runs in the mode its source advertised`, canPin === pinned,
+              `source says ${pinned ? 'pinnable' : 'unpinnable'}, the loaded page says ${canPin ? 'pinnable' : 'unpinnable'}`);
+    // Not --save-poses: the poses are reviewed on the build under test, and one set of
+    // six files with unambiguous names beats two sets that overwrite each other.
+    const b = await capture(ctx, { pin: pinned });
 
     // --- the diff ------------------------------------------------------
     const scores = [];

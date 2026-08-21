@@ -17,6 +17,8 @@
 //   --window WxH           Chrome's window size (default 1280,860). The perf baseline is
 //                          only comparable at the default — move it for headless logic runs only
 //   --keep-open            leave Chrome up afterwards to poke at the failure
+//   --save-poses           `ab` only: write every pose to .playtest/ even on a pass, so the
+//                          six camera angles can be reviewed rather than trusted
 //   --save-baseline        record this run's perf numbers as the local baseline
 //   --keep-profile         reuse the Chrome profile instead of wiping it
 //
@@ -49,7 +51,7 @@ const SCENARIOS = { soak, chaos, perf, boss, medals, layout, ab };
 // ---------------------------------------------------------------- args
 function parseArgs(argv) {
   const cfg = { scenario: 'soak,chaos,perf,boss,medals,layout', waves: 4, perfWave: 6, turbo: 6, seed: 1,
-                url: null, headless: false, keepOpen: false, saveBaseline: false,
+                url: null, headless: false, keepOpen: false, saveBaseline: false, savePoses: false,
                 keepProfile: false, pointLightCap: 8, baseline: 'HEAD', noSandbox: false,
                 window: '1280,860' };
   for (let i = 0; i < argv.length; i++) {
@@ -66,6 +68,7 @@ function parseArgs(argv) {
     else if (a === '--no-sandbox') cfg.noSandbox = true;
     else if (a === '--window') cfg.window = next().replace('x', ',');
     else if (a === '--keep-open') cfg.keepOpen = true;
+    else if (a === '--save-poses') cfg.savePoses = true;
     else if (a === '--save-baseline') cfg.saveBaseline = true;
     else if (a === '--keep-profile') cfg.keepProfile = true;
     else if (a === '--help' || a === '-h') { printHelp(); process.exit(0); }
