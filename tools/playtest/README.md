@@ -43,7 +43,7 @@ Before believing any FPS number:
 | console / exceptions / failed requests | anything the page logged, including CSP violations |
 | frame times under shotgun spam | jank, stalls, and FPS/draw-call regression vs a local baseline |
 | **medal award / persistence** | a medal that re-toasts, does not persist, or a recap grid that mislabels earned vs unearned |
-| **alternating boss waves** | wave 10's ARTILLERY telegraphing, escalating, spawning minis and taking its live barrage with it when it dies — and wave 5's melee fight still being the melee fight |
+| **alternating boss waves** | wave 10's ARTILLERY telegraphing, escalating, spawning its own amber minis and taking its live barrage with it when it dies — wave 5's melee fight still being the melee fight — and either boss naming itself in the recap with the name its title card drew |
 | **card reachability at 1280x700, 844x390 and 1280x950** | a CTA — or the death card's first-timer NAME row — that grew below the fold of its own scroll box, or under the sticky footer; items 47/56/57 all hit this and none of them could fail a run on it |
 | **sticky footer paint, in both states** | a footer band that lets the content behind it stay legible while the card scrolls — or that paints at all on a window where nothing overflows (item 67's property) |
 
