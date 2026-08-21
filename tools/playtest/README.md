@@ -5,7 +5,7 @@
 Starts its own static server and its own dedicated Chrome, plays several waves, dies,
 restarts, plays another, dies, restarts again — and asserts the things a human watching
 the screen cannot see. Then five more scenarios do the same for hostile restarts, the boss
-waves, medals and short viewports. ~2 minutes on an M-series laptop, exits non-zero on
+waves, medals and short viewports. ~90 seconds on an M-series laptop, exits non-zero on
 failure, writes `.playtest/report.json`.
 
 It does **not** replace the playtest. Feel, audio, bloom intensity, readability and
@@ -49,6 +49,7 @@ Before believing any FPS number:
 | **card reachability at 1280x700, 844x390 and 1280x950** | a CTA — or the death card's first-timer NAME row — that grew below the fold of its own scroll box, or under the sticky footer; items 47/56/57 all hit this and none of them could fail a run on it |
 | **sticky footer paint, in both states** | a footer band that lets the content behind it stay legible while the card scrolls — or that paints at all on a window where nothing overflows (item 67's property) |
 | **fresh-page precondition, per scenario** | a scenario that starts from the last one's leftovers instead of its own setup (item 73) |
+| **visual A/B vs a git ref** (opt-in) | a "purely cosmetic" refactor that moved the frame — a MAD score per camera pose against an older build, with the worst tile named |
 
 The state diff is the one worth understanding: two snapshots are taken **in the same
 JavaScript turn as the button click that starts a run**, so both are exactly "t = 0 of a
@@ -121,6 +122,7 @@ re-record it with `--save-baseline` rather than loosening the 0.8 tolerance.
     make playtest ARGS="--seed 7"             a different, still reproducible run
     make playtest ARGS="--waves 6 --turbo 8"  a longer soak
     make playtest ARGS="--scenario perf"      one scenario (default: soak,chaos,perf,boss,medals,layout)
+    make playtest ARGS="--scenario ab --baseline v0.21.5"   diff the frame against a git ref
     make playtest ARGS="--save-baseline"      record this machine's perf numbers
     make playtest ARGS="--headless"           SwiftShader: logic and leaks only, FPS meaningless
     make playtest ARGS="--url https://neon-strike-7b6.pages.dev/"   smoke the live site
@@ -145,6 +147,7 @@ would also wipe the medals, best score and name saved in the profile you kept.
     probes.mjs         probe expressions + the assertions over them
     scenarios/soak.mjs the play/die/restart loop and the leak comparisons
     scenarios/chaos.mjs restarting, dying and pausing at hostile moments (item 64)
+    scenarios/ab.mjs   the visual A/B signature against a git ref (item 65)
     scenarios/perf.mjs the frame-time sample under shotgun spam
     scenarios/boss.mjs the wave 5 / wave 10 boss fights (item 45)
     scenarios/medals.mjs medal awards, the toast queue and the recap grid (item 41)
@@ -230,6 +233,59 @@ novas and a full spawn cycle, so it mints the geometry those paths own (15 geome
 3 textures, measured) and a comparison across it reads warm-up as a leak. Pass 2 does the
 identical work on warm pools and adds nothing, which is what makes the GPU check across it
 tight enough to mean something.
+
+`ab` (item 65) is the shape for a scenario that compares the game against **itself at
+another commit**. It serves `git show <ref>:index.html` from a second port, walks six fixed
+camera poses on each build, and scores a mean absolute difference per pose — replacing "run
+the old one on :8001 and squint at two windows", which is a judgement nobody repeats on the
+fifth pose. It is deliberately **not in the default scenario list**: its default baseline is
+`HEAD`, so a default run would go red on every legitimate visual item.
+
+    make playtest ARGS="--scenario ab --baseline v0.21.5"
+
+Five things it must keep doing:
+
+- **Compute the signature in the page** — `drawImage` the canvas down to 16x16 and read it
+  back as 768 numbers. No image library, so `make playtest` still needs nothing installed.
+- **Sample inside a one-shot rAF.** The renderer has no `preserveDrawingBuffer`, so the
+  buffer is only readable between the render and the composite; rAF callbacks fire in
+  registration order and the game registered `animate()` at boot, so a callback registered
+  now runs after it. Read the canvas anywhere else and you get black — identically on both
+  builds, which scores a perfect 0 and looks like a pass.
+- **Hold the wave open with `toSpawn = 1` and the spawn timer at infinity.** The wave-clear
+  test is `toSpawn === 0 && enemies.length === 0`, so an arena emptied the obvious way
+  clears wave 1 on the first frame and slides the upgrade screen over every pose — at a
+  wall-clock moment that differs between the two builds. That was worth ~18 MAD of pure
+  noise before it was found.
+- **Pin both clocks the frame is a function of**: `state.time` (the grid shader's pulse)
+  and `envTime`, which `__probe.fn.resetEnv` zeroes along with the trim, cap and dust state
+  it drives. `updateEnv` breathes every wall trim by +/-38% on a ~7 s cycle, accumulating
+  from page load and never reset mid-run, so two builds photographed from the same camera
+  differ by whatever phase each page was at. Note what does NOT work: `state.paused` freezes
+  almost none of this, because `updateEnv` and `updateAttract` are called outside the
+  running/paused gate on purpose. Pinning took the noise floor from 0.25 MAD to 0.005.
+  A baseline ref older than item 65 has no `resetEnv` on its probe; the call is guarded and
+  the run says so, because a marginal score against an unpinned baseline must not read as a
+  clean one.
+- **Assert the mean AND the worst tile**, because the two kinds of visual change do not
+  look alike in one number. A global change moves the whole frame a little — bloom off
+  scores 5-12 MAD — and the mean catches it. A LOCAL change moves a few tiles a lot and
+  barely moves the mean: repainting a sector's grid line colour scores 0.10-0.89 MAD,
+  under any threshold the noise permits, while shifting its worst tile by 12-32. Assert
+  only the mean and every recolour walks through; assert only the tile and one drifting
+  dust mote fails the run. The tile half is skipped against a baseline too old to pin its
+  arena clock, where the unpinned floor's own worst tiles reach 45-75.
+- **Measure the floor, never assume it.** A vs A runs first, every time, and the run fails
+  if either floor climbs within `FLOOR_MARGIN` of its threshold. Both thresholds came from
+  measurement, not taste: fully pinned, A-vs-A is 0.004 MAD with a worst tile of 0.3, so
+  1.0 and 4.0 sit ~250x and ~13x above the floor and ~3x under the smallest change worth
+  catching. Pick a new pose the same way — the steep look-down this scenario shipped with
+  scored 0.00 against a recoloured grid, because from eye height you see three antialiased
+  lines and a lot of dark floor and a 16x16 average erases them. A pose earns its place by
+  seeing MORE of the thing it is there for, not by being prettier.
+
+PNGs land in `.playtest/ab-*.png` on failure only — `-baseline` is the ref, `-current` is
+the working tree. The number says something changed; the picture says what.
 
 `boss` (item 45) is the third shape: a scenario about a fight the ordinary run never
 reaches. The soak clears four waves and dies, so wave 5 and wave 10 were unverified

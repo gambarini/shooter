@@ -8,6 +8,8 @@
 //   --perf-wave N          wave to reach before the FPS sample (default 6)
 //   --turbo N              sim sub-steps per frame while playing, 1..8 (default 6)
 //   --seed N               seeds Math.random, so a failing run is reproducible
+//   --baseline REF         git ref the `ab` scenario diffs the current frame against
+//                          (default HEAD; `ab` is opt-in and not in the default list)
 //   --url URL              test an already-served build instead of the repo (e.g. the
 //                          live site, or `make dev` on :8788) — nothing is served then
 //   --headless             SwiftShader; fine for logic + leaks, MEANINGLESS for FPS
@@ -32,17 +34,20 @@ import boss from './scenarios/boss.mjs';
 import medals from './scenarios/medals.mjs';
 import layout from './scenarios/layout.mjs';
 import chaos from './scenarios/chaos.mjs';
+import ab from './scenarios/ab.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
 const OUT = join(ROOT, '.playtest');
-const SCENARIOS = { soak, chaos, perf, boss, medals, layout };
+// `ab` is deliberately absent from the DEFAULT list below, not from this map: its default
+// baseline is HEAD, so every legitimate visual item would turn the default run red.
+const SCENARIOS = { soak, chaos, perf, boss, medals, layout, ab };
 
 // ---------------------------------------------------------------- args
 function parseArgs(argv) {
   const cfg = { scenario: 'soak,chaos,perf,boss,medals,layout', waves: 4, perfWave: 6, turbo: 6, seed: 1,
                 url: null, headless: false, keepOpen: false, saveBaseline: false,
-                keepProfile: false, pointLightCap: 8 };
+                keepProfile: false, pointLightCap: 8, baseline: 'HEAD' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i], next = () => argv[++i];
     if (a === '--scenario') cfg.scenario = next();
@@ -50,6 +55,7 @@ function parseArgs(argv) {
     else if (a === '--perf-wave') cfg.perfWave = +next();
     else if (a === '--turbo') cfg.turbo = Math.max(1, Math.min(8, +next()));
     else if (a === '--seed') cfg.seed = +next();
+    else if (a === '--baseline') cfg.baseline = next();
     else if (a === '--url') cfg.url = next();
     else if (a === '--point-light-cap') cfg.pointLightCap = +next();
     else if (a === '--headless') cfg.headless = true;

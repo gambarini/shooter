@@ -4536,7 +4536,14 @@ window.__probe = {
         // global board never renders on its own and the "does the name row survive the
         // board landing under it?" case would go unchecked. This lets the layout
         // scenario draw a synthetic board with no network.
-        renderGlobalBoard },
+        renderGlobalBoard,
+        // Item 65 — the arena idles alive: `updateEnv` breathes the wall trims by +/-38% on
+        // a ~7 s cycle off an `envTime` that accumulates from page load and is never reset
+        // mid-run. Two builds photographed from the same camera therefore differ by
+        // whatever phase each page happened to be at, which swamped the visual A/B's
+        // signal. resetEnv() settles trims, caps and dust and zeroes that clock, so the A/B
+        // scenario can pin the environment the same way it pins state.time.
+        resetEnv },
   // Item 64 — the boss intro is a module-level countdown driven from animate(), so it is
   // the one hostile moment the chaos scenario cannot see from state, mods or the DOM: the
   // card is hidden by gameOver() while the timer (and the FOV punch it owns) keeps running.
