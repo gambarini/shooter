@@ -125,6 +125,7 @@ re-record it with `--save-baseline` rather than loosening the 0.8 tolerance.
     make playtest ARGS="--scenario ab --baseline v0.21.5"   diff the frame against a git ref
     make playtest ARGS="--save-baseline"      record this machine's perf numbers
     make playtest ARGS="--headless"           SwiftShader: logic and leaks only, FPS meaningless
+    make playtest ARGS="--no-sandbox"        drop Chrome's sandbox — CI containers only
     make playtest ARGS="--url https://neon-strike-7b6.pages.dev/"   smoke the live site
 
 `node tools/playtest/run.mjs --help` prints the full list.
@@ -336,6 +337,21 @@ it a must-run-last scenario; since item 73 it rewrites and reloads a page nothin
 see. It also gives its parked player the target-dummy hp pool: the toast waits are seconds
 of turbo-8 simulation, and a death in one of them calls `gameOver()`, which empties the
 queue the next check reads — the coupling that made `--scenario medals` fail alone.
+
+## It also runs in CI (item 66)
+
+`.github/workflows/ci.yml` runs `--headless --no-sandbox --scenario soak,chaos` on every
+pull request and every push to `main`, and **that file owns the whole story** — which
+scenarios it runs and why those, how Chrome is located, why it is a separate workflow from
+the deploy, and what its one known flake risk is. Read it there rather than here.
+
+The half worth knowing at this end: `--headless` must never assert an FPS number, because
+SwiftShader renders on the CPU. `perf` gates its two absolute frame-time checks on it, and
+item 66 found the baseline comparison was NOT gated and fixed that — on a vsync-capped
+laptop both renderers pin at 59.9, so the wrong check had been passing rather than failing,
+which is how it survived. Draw calls and triangle counts do transfer between renderers
+(295 headless against a 331 GPU baseline) and stay asserted in both modes. If you add a
+check, ask which of those two kinds it is before letting it run headless.
 
 ## Dev-only
 

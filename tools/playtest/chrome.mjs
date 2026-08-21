@@ -26,7 +26,8 @@ export function findChrome() {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-export async function launch({ profileDir, headless = false, keepProfile = false, window = '1280,860' } = {}) {
+export async function launch({ profileDir, headless = false, keepProfile = false,
+                               noSandbox = false, window = '1280,860' } = {}) {
   const bin = findChrome();
   // A wiped profile each run is what makes a run reproducible: settings live in
   // localStorage, so a stale profile could start the game with bloom off and
@@ -51,6 +52,12 @@ export async function launch({ profileDir, headless = false, keepProfile = false
     'about:blank',
   ];
   if (headless) args.unshift('--headless=new', '--enable-unsafe-swiftshader');
+  // CI only, and opt-in so a local run never silently loses the sandbox. Ubuntu 24.04
+  // restricts the unprivileged user namespaces Chrome's sandbox needs via AppArmor, which
+  // GitHub's runner image inherits; a sandboxed Chrome there dies before it writes
+  // DevToolsActivePort. Whether the workflow actually needs it is a question for the first
+  // CI run, not an assumption — see .github/workflows/ci.yml.
+  if (noSandbox) args.unshift('--no-sandbox');
 
   const proc = spawn(bin, args, { stdio: 'ignore', detached: false });
   proc.on('error', e => { throw e; });

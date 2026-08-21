@@ -1,0 +1,97 @@
+# NEON STRIKE — pre-merge verification (roadmap item 66).
+#
+# The playtest harness only catches a regression if somebody runs it, and "run
+# `make playtest` before you commit" is exactly the instruction that gets skipped.
+# This runs the logic-and-leaks half of it on every PR and every push to main, so a
+# forgotten playtest cannot ship a leak.
+#
+# It is a SEPARATE workflow from deploy.yml on purpose. The deploy is already gated
+# on `node --test lib/leaderboard-core.test.mjs`, which it runs itself; adding a
+# browser job to that file would put ~90 s of Chrome in front of every deploy for a
+# check that has already run on the commit. Two workflows means they run in parallel
+# and the deploy path is not slowed at all. The unit test is repeated here so that
+# PRs — which deploy.yml does not trigger on — are covered by it too.
+#
+# No `paths-ignore` here, unlike deploy.yml. A harness-only change under `tools/**`
+# is skipped for deploys because it cannot reach the live site, but it is precisely
+# what this workflow exists to check.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    # A hung Chrome would otherwise sit at the job default of 6 hours. The whole job
+    # is well under 3 minutes; 10 is generous and still a backstop.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      # Pinned rather than left to the runner image's default, which drifts between
+      # image releases. Node 22+ is a hard requirement: tools/playtest/cdp.mjs is a
+      # CDP client built on the GLOBAL WebSocket, which is what lets the harness talk
+      # to Chrome with zero dependencies. On Node 20 it fails with a bare
+      # "WebSocket is not defined" that says nothing about the real cause.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Unit-test pure leaderboard logic
+        # Explicit file, NOT `node --test lib/` — pointed at a directory the runner
+        # exits 0 with "no tests found", so a renamed test would pass forever. Same
+        # command as `make test` and as deploy.yml's own gate.
+        run: node --test lib/leaderboard-core.test.mjs
+
+      - name: Locate Chrome
+        # Google Chrome is preinstalled on the GitHub-hosted ubuntu images, and
+        # tools/playtest/chrome.mjs finds it by name. Resolve it here anyway and fail
+        # loudly with the version if it is ever absent: a missing browser should read
+        # as "the image changed", not as a mysterious "Chrome never wrote
+        # DevToolsActivePort" 20 seconds into the run. Nothing is pinned — a Chrome
+        # version pinned here would silently rot instead.
+        run: |
+          BIN=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)
+          if [ -z "$BIN" ]; then
+            echo "::error::no Chrome on this runner image — the playtest harness cannot run"
+            exit 1
+          fi
+          echo "CHROME=$BIN" >> "$GITHUB_ENV"
+          echo "using $BIN — $("$BIN" --version)"
+
+      - name: Headless playtest — leaks, state and hostile restarts
+        # soak (item 58) and chaos (item 64) are the two scenarios that assert only
+        # logic: the t=0 reset diff, pool conservation, GPU accounting and the point-
+        # light budget. None of them touches an FPS number, which is what makes them
+        # meaningful under SwiftShader's CPU renderer, where FPS is not. perf, boss,
+        # medals and layout stay out — they judge frame times, screenshots and
+        # viewport emulation, and are a human's job or a local one.
+        #
+        # --no-sandbox because Ubuntu 24.04 restricts the unprivileged user namespaces
+        # Chrome's sandbox needs; it is opt-in precisely so local runs keep theirs.
+        #
+        # The one known flake risk is the unpkg CDN: index.html imports three.js from
+        # it, so a CDN outage reads here as "the engine never booted". If that starts
+        # happening, fix it at the source — a gate that fails randomly gets disabled,
+        # and then nothing is gated.
+        run: node tools/playtest/run.mjs --headless --no-sandbox --scenario soak,chaos
+
+      - name: Upload the playtest report on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playtest-report
+          # report.json names every failing check; failure.png is the frame the
+          # harness captured when it gave up. Both are what a red run needs and
+          # neither survives the runner.
+          path: |
+            .playtest/report.json
+            .playtest/*.png
+          if-no-files-found: ignore
+          retention-days: 7

@@ -13,6 +13,7 @@
 //   --url URL              test an already-served build instead of the repo (e.g. the
 //                          live site, or `make dev` on :8788) — nothing is served then
 //   --headless             SwiftShader; fine for logic + leaks, MEANINGLESS for FPS
+//   --no-sandbox           drop Chrome's sandbox — for CI containers only, never locally
 //   --keep-open            leave Chrome up afterwards to poke at the failure
 //   --save-baseline        record this run's perf numbers as the local baseline
 //   --keep-profile         reuse the Chrome profile instead of wiping it
@@ -47,7 +48,7 @@ const SCENARIOS = { soak, chaos, perf, boss, medals, layout, ab };
 function parseArgs(argv) {
   const cfg = { scenario: 'soak,chaos,perf,boss,medals,layout', waves: 4, perfWave: 6, turbo: 6, seed: 1,
                 url: null, headless: false, keepOpen: false, saveBaseline: false,
-                keepProfile: false, pointLightCap: 8, baseline: 'HEAD' };
+                keepProfile: false, pointLightCap: 8, baseline: 'HEAD', noSandbox: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i], next = () => argv[++i];
     if (a === '--scenario') cfg.scenario = next();
@@ -59,6 +60,7 @@ function parseArgs(argv) {
     else if (a === '--url') cfg.url = next();
     else if (a === '--point-light-cap') cfg.pointLightCap = +next();
     else if (a === '--headless') cfg.headless = true;
+    else if (a === '--no-sandbox') cfg.noSandbox = true;
     else if (a === '--keep-open') cfg.keepOpen = true;
     else if (a === '--save-baseline') cfg.saveBaseline = true;
     else if (a === '--keep-profile') cfg.keepProfile = true;
@@ -153,7 +155,8 @@ try {
   console.log(`${C.dim}NEON STRIKE playtest — ${url}  seed=${cfg.seed} turbo=${cfg.turbo}${cfg.headless ? ' headless' : ''}${C.off}\n`);
 
   // 2. dedicated Chrome + CDP
-  chrome = await launch({ profileDir: join(HERE, '.chrome-profile'), headless: cfg.headless, keepProfile: cfg.keepProfile });
+  chrome = await launch({ profileDir: join(HERE, '.chrome-profile'), headless: cfg.headless,
+                          keepProfile: cfg.keepProfile, noSandbox: cfg.noSandbox });
   cdp = await attachToPage(chrome.port);
   await Promise.all([cdp.send('Runtime.enable'), cdp.send('Log.enable'),
                      cdp.send('Network.enable'), cdp.send('Page.enable')]);

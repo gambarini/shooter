@@ -72,8 +72,17 @@ export default async function perf(ctx) {
   if (existsSync(BASELINE)) {
     const base = JSON.parse(readFileSync(BASELINE, 'utf8'));
     const ratio = r.fpsMedian / base.fpsMedian;
-    ctx.check('no FPS regression vs the local baseline', ratio >= 0.8,
-              `${r.fpsMedian} vs baseline ${base.fpsMedian} (${(ratio * 100).toFixed(0)}%)`);
+    // Item 66 was asked to confirm that no FPS assertion fires headless, and found this one
+    // did: `headless` gated the two absolute checks above but never this comparison, so
+    // `--headless` on any machine that had run --save-baseline was scoring a SwiftShader
+    // CPU render against a GPU number. It happens not to fail on a vsync-capped laptop
+    // (both pin at 59.9 in this scene), which is exactly why it survived — a check that is
+    // wrong but usually passes is worse than one that is loud. Draw calls stay asserted in
+    // both modes: the scene is identical, so the count is, and it is the perf signal that
+    // transfers between machines AND renderers (295 headless vs a 331 GPU baseline).
+    if (cfg.headless) ctx.log(`headless: FPS vs baseline not asserted (${r.fpsMedian} vs ${base.fpsMedian}) — different renderer`);
+    else ctx.check('no FPS regression vs the local baseline', ratio >= 0.8,
+                   `${r.fpsMedian} vs baseline ${base.fpsMedian} (${(ratio * 100).toFixed(0)}%)`);
     ctx.check('no draw-call regression vs the local baseline', r.drawCallsMax <= base.drawCallsMax * 1.25,
               `${r.drawCallsMax} vs baseline ${base.drawCallsMax}`);
   } else {
