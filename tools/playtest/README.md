@@ -221,13 +221,12 @@ diff and pool-conservation law unchanged. Four things it must keep doing:
   mid-`choosing` leaves the upgrade overlay above the death card; this is the one place in
   the rig where bypassing hit-testing is correct, and it is the opposite of what
   `layout` needs. Don't unify them.
-- **Real `KeyboardEvent`s in the monkey pass, and no Escape or KeyP.** `probe.setKey`
-  writes the `keys` map directly and so reaches nothing that lives in the keydown
-  *handler* — Q (dash) and E (nova) set their intent flags there and setKey can never
-  trigger either. Escape and KeyP are excluded because `driven` stands down only the
-  game's *automatic* pauses: one stray press parks an unattended run on the pause card and
-  every later wait times out. Pause is tested as its own verb instead, where the resume is
-  guaranteed.
+- **No Escape or KeyP in the monkey pass.** Every other key is fair game — `probe.setKey`
+  dispatches a real `KeyboardEvent` (see its comment in `index.html`), so the monkey
+  exercises the keydown handlers rather than bypassing them. Escape and KeyP are excluded
+  because `driven` stands down only the game's *automatic* pauses: one stray press parks an
+  unattended run on the pause card and every later wait times out. Pause is tested as its
+  own verb instead, where the resume is guaranteed.
 
 Its monkey pass runs **twice**, for the same reason soak's GPU comparison is its second
 restart: pass 1 is the first thing in the scenario to play long enough to reach pickups,

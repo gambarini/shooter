@@ -61,7 +61,8 @@ export default async function medals(ctx) {
 
   // ------------------------------------------------------------------ blast multi-kill
   // NOVA exercises the gated blast counter that DEMOLITIONIST shares. E is handled by a
-  // real keydown listener rather than the polled key map, so dispatch a real event.
+  // real keydown listener rather than the polled key map — which is exactly what
+  // `probe.setKey` dispatches since item 78.
   await ctx.eval(`window.__probe.turbo = 8; window.__probe.fn.startWave(4); return true;`);
   const nearby = () => ctx.eval(`const p = window.__probe;
     p.player.hp = p.player.maxHp;   // the harness does not dodge; keep it alive to the blast
@@ -71,7 +72,7 @@ export default async function medals(ctx) {
   for (let i = 0; i < 300 && near < 4; i++) { near = await nearby(); if (near < 4) await sleep(120); }
   const killsBefore = await ctx.eval('return window.__probe.medals.kills;');
   await ctx.eval(`window.__probe.state.ult = 100;
-    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyE', bubbles: true }));
+    window.__probe.setKey('KeyE', true);
     return true;`);
   await sleep(600);
   ctx.check('NOVA fires on a 3+ multi-kill (the blast counter counts, and only in a blast)',

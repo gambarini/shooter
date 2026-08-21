@@ -46,16 +46,17 @@ const rng = seed => { let s = seed >>> 0; return () => {
 // stands down the game's AUTOMATIC pauses (blur, visibility, lost pointer lock) but not
 // the explicit ones, so a single stray press parks an unattended run on the pause card
 // and every later wait times out. Pausing IS tested — as its own verb, at each moment,
-// where the resume is guaranteed.
+// where the resume is guaranteed. Note that Escape and KeyP would now LAND: since item 78
+// `probe.setKey` dispatches the real event, so this list is the only thing keeping them out.
 const MONKEY_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft',
                      'KeyR', 'KeyQ', 'KeyE', 'Digit1', 'Digit2', 'Digit3'];
 
-// Real KeyboardEvents, not `probe.setKey`. setKey writes the `keys` map directly, which
-// is enough for movement but reaches nothing that lives in the keydown HANDLER — Q (dash)
-// and E (nova) set their intent flags there, so setKey can never trigger either. Firing
-// the real event is also what makes the monkey pass a test of the handlers.
-const press = code => `document.dispatchEvent(new KeyboardEvent('keydown', { code: '${code}', bubbles: true }));`;
-const release = code => `document.dispatchEvent(new KeyboardEvent('keyup', { code: '${code}', bubbles: true }));`;
+// One press, one `setKey` — it is a real KeyboardEvent since item 78, so the monkey is a
+// test of the keydown handlers and not a bypass of them. This file used to carry its own
+// press()/release() dispatch pair, because setKey wrote the `keys` map directly and could
+// never reach Q (dash) or E (nova), whose intent flags are set in the handler.
+const press = code => `window.__probe.setKey('${code}', true);`;
+const release = code => `window.__probe.setKey('${code}', false);`;
 
 // Give the parked player a target-dummy hp pool. Same reason boss.mjs does it and does not
 // use `invuln`: several moments here are boss waves, the barrage must be allowed to

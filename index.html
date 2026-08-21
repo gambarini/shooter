@@ -4549,7 +4549,17 @@ window.__probe = {
   // card is hidden by gameOver() while the timer (and the FOV punch it owns) keeps running.
   // resetGame clears both; this is what lets a check say so.
   get bossIntroT() { return bossIntroT; },
-  setKey:  (code, down) => { keys[code] = !!down; },
+  // Item 78 — one call is one real keypress, for EVERY key. This used to write the `keys`
+  // map directly, which covered movement/sprint/jump (read from the map in update()) and
+  // silently reached nothing that lives in the keydown HANDLER: `setKey('KeyQ', true)`
+  // looked like a dash and was a no-op, so a scenario testing the dash would pass while
+  // testing nothing. Dispatching the event instead covers Q/E/R/1-3/P/Escape too, and
+  // exercises the handlers rather than bypassing them. Synthetic KeyboardEvents are
+  // non-cancelable, so Space's preventDefault is a no-op here. Repeat presses without a
+  // release are sent as-is (the keyboard's own auto-repeat shape).
+  setKey:  (code, down) => {
+    document.dispatchEvent(new KeyboardEvent(down ? 'keydown' : 'keyup', { code, bubbles: true }));
+  },
   setFire: (v) => { mouseDown = !!v; },
   // Aim straight at a world point. Matches the forward vector animate() builds from
   // yaw/pitch: (-sin(yaw)cos(pitch), sin(pitch), -cos(yaw)cos(pitch)).
