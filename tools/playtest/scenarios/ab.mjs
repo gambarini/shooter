@@ -133,6 +133,12 @@ const ARM = `const p = window.__probe;
 // in one CDP round-trip and freezing in the next leaves however many frames ran in between,
 // and the residual showed up as a 5 ms clock skew and a 0.005 MAD floor.
 //
+// `resetEnv()` is called unguarded here, unlike everywhere else this scenario touches an old
+// build: `pin` is true only when the `fixedDt` marker matched, and that field postdates
+// resetEnv, so the chain marker => fixedDt => resetEnv holds. The freeze also cannot outlive
+// a pose — THAW follows every pinned capture, and every path out of here (the next `goto`,
+// the `finally`) reloads the page, which drops the flag with it.
+//
 // Both builds always run in the SAME mode, which is the point (item 79). Pinning the build
 // under test while the baseline's env clock ran free was worse than pinning neither: the
 // asymmetry put A at phase 0 and B at whatever phase it had reached, worth up to 1.1 MAD on
@@ -244,7 +250,14 @@ export default async function ab(ctx) {
   // floor is measured before the baseline is ever loaded — and it has to be measured in the
   // mode the comparison will use, or it characterises something else. `probe.fixedDt` is the
   // marker: it arrived (item 79) after `__probe.fn.resetEnv` (item 65), so a build carrying
-  // it carries both pins. The runtime confirms it below; a marker that lies fails the run.
+  // it carries both pins.
+  //
+  // It is a substring test against a moving target, so it has a safety net rather than a
+  // guarantee: rename or destructure `probe.fixedDt` in index.html and this silently reads
+  // false, the run drops to unpinned mode and the tile assertion quietly disappears — green,
+  // checking less. What stops that is the runtime cross-check below (`runs in the mode its
+  // source advertised`), which fails the run when the marker and the loaded page disagree.
+  // If you move that field, that check is where you will find out.
   const pinned = baselineSrc.includes('probe.fixedDt');
   if (!pinned) ctx.log(`baseline ${ref} predates __probe.fixedDt, so NEITHER build pins its clocks ` +
                        `for this run — symmetric and unpinned beats pinned-vs-unpinned, which scored ` +
