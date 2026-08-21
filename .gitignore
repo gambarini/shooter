@@ -12,3 +12,12 @@ dist/
 # purpose — an FPS number from one machine is not a threshold for another.
 tools/playtest/.chrome-profile/
 .playtest/
+
+# Agent worktrees. `/roadmap-item fanout` and any `isolation: worktree` agent check a
+# second copy of the whole repo out under here; git already keeps a nested worktree out
+# of the index, but not out of a search. Item 77's stale copy (branch merged 27 commits
+# earlier, never cleaned up) returned a second hit for every line of CLAUDE.md, the
+# Makefile and README.md that items 74-76 audited for duplication. Ignoring the path
+# makes the ignore-aware tools — ripgrep, and every editor search built on it — skip
+# these copies by default; `grep -r` still needs `--exclude-dir`.
+.claude/worktrees/
