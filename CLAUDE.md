@@ -23,6 +23,7 @@ missed the fourth; item 60 needed a whole extra commit to repair a cross-referen
 | `/roadmap-item` modes, the fan-out topology, the two workflow invocations | **`.claude/skills/roadmap-item/SKILL.md`** |
 | The playtest harness: what it runs, how long it takes, what it checks, its options, how to extend it | **`tools/playtest/README.md`** |
 | *Why* each `make` recipe is written the way it is (the staging, the copies, the explicit filename), and what the internal targets (`schema`) do | **the `Makefile` comments** |
+| The outward-facing pitch: what the game is, its controls, and getting it running for the first time | **`README.md`** |
 
 Notion owns *what to build*; the repo owns *how to work*.
 
