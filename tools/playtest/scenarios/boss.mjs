@@ -8,13 +8,14 @@
 // regular spawn queue zeroed so the boss fights alone and every count below is about the
 // boss and nothing else.
 //
-// The bot is stopped for the whole scenario: it dodges, and a barrage nobody stands in
-// proves nothing. The player is parked and topped up between polls instead, so the fight
-// runs long enough to reach phase 2 — which is also what makes "the mortars hurt, and the
-// recap names what fired them" assertable.
+// The bot never runs here: it dodges, and a barrage nobody stands in proves nothing. The
+// player is parked and topped up between polls instead, so the fight runs long enough to
+// reach phase 2 — which is also what makes "the mortars hurt, and the recap names what
+// fired them" assertable.
 //
-// It runs after `perf` (which needs turbo 1 and an undisturbed frame sample) and before
-// `medals` (which rewrites localStorage and reloads).
+// It leaves the bot stopped and a boss wave half-fought, and that is fine: since item 73
+// the harness hands every scenario a fresh page, so nothing downstream inherits this one's
+// wreckage and its position in the list means nothing.
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
@@ -117,6 +118,8 @@ export default async function boss(ctx) {
     return status();
   };
 
+  // resetPage leaves the bot injected and stopped, so this is belt-and-braces — but it is
+  // the one precondition this whole scenario is built on, so it says so out loud.
   await ctx.eval('if (window.__bot) window.__bot.stop(); return true;');
 
   // ------------------------------------------------------------------ wave 10: ARTILLERY
@@ -272,12 +275,4 @@ export default async function boss(ctx) {
   s = await status();
   ctx.check('minis still deploy on a real wave 10, with its own spawns in the arena',
             s.minis >= 2 && crowd > 6, `${s.minis} minis with ${s.enemies} enemies alive (peak ${crowd})`);
-
-  // Leave the page the way `medals` expects to find it. `perf` leaves the bot RUNNING and
-  // `medals` quietly depends on that: with nobody dodging, its parked player dies to wave 1
-  // inside the toast-queue wait, and gameOver() empties the queue that check is watching.
-  // Restarting the bot here is not tidiness — without it, medals fails.
-  await ctx.eval(`const p = window.__probe; p.fn.resetGame(); p.state.running = false;
-    if (window.__bot) window.__bot.start();
-    return true;`);
 }

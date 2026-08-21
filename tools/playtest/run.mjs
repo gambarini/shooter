@@ -97,6 +97,34 @@ const ctx = {
     await ctx.waitFor('window.__neonReady === true', { timeout: 30_000, label: 'reboot' });
     await cdp.eval(readFileSync(join(HERE, 'bot.js'), 'utf8') + '\nreturn true;');
   },
+  // Put the page back into the only state a scenario is entitled to assume: a freshly
+  // booted document at the title card, with the bot injected and stopped, no run in
+  // progress, turbo 1 and a clean profile (item 73).
+  //
+  // The contract that makes this cheap: a reload resets EVERYTHING in-page, so the only
+  // things needing an explicit clear are the two that survive it — `localStorage` and the
+  // CDP `Emulation` overrides. Nothing else here has to know what the last scenario did.
+  //
+  // The scenario loop calls it before every scenario, so order independence is structural
+  // rather than a convention each new file has to remember.
+  async resetPage() {
+    // Cleared BEFORE navigating: the game reads every `neonstrike.*` key at boot. By
+    // prefix rather than localStorage.clear(), which would also wipe anything Chrome or a
+    // --url target keeps here. In a try, because a scenario that broke the page must not
+    // be able to block the reset that repairs it.
+    try {
+      await cdp.eval(`for (const k of Object.keys(localStorage))
+        if (k.startsWith('neonstrike.')) localStorage.removeItem(k);
+      return true;`);
+    } catch { /* the reload below fixes the page regardless */ }
+    await cdp.send('Emulation.clearDeviceMetricsOverride');
+    await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false, maxTouchPoints: 1 });
+    await ctx.reload();
+    // `driven` from the first frame, not from the scenario's first bot.start(): until it
+    // is set the blur/visibility auto-pauses are armed, and a Chrome window that loses
+    // focus in that gap pauses the game into a timeout nothing explains.
+    await cdp.eval('window.__probe.driven = true; window.__probe.turbo = 1; return true;');
+  },
   // Poll a boolean expression in the page. Every wait in the rig is a condition,
   // never a fixed sleep — turbo makes any hard-coded duration wrong.
   async waitFor(expr, { timeout = 90_000, label = expr, poll = 100, onPoll } = {}) {
@@ -177,6 +205,20 @@ try {
     const fn = SCENARIOS[name];
     if (!fn) { ctx.check(`scenario ${name}`, false, 'no such scenario'); continue; }
     console.log(`\n${C.dim}── ${name} ──${C.off}`);
+    // Item 73: every scenario starts from the same fresh page, so running one alone or
+    // reordering the list cannot change a result. The order in SCENARIOS is kept for
+    // readability — cheap first, environment-bending last — and nothing depends on it.
+    await ctx.resetPage();
+    const pre = JSON.parse(await cdp.eval(`return JSON.stringify({
+      ready: window.__neonReady === true, version: window.__probe && window.__probe.version,
+      running: window.__probe.state.running,
+      title: !document.getElementById('startCard').classList.contains('hidden'),
+      bot: typeof window.__bot === 'object',
+      profile: Object.keys(localStorage).filter(k => k.startsWith('neonstrike.')) });`));
+    ctx.check(`${name}: starts from a fresh page`,
+              pre.ready && pre.version === 1 && !pre.running && pre.title &&
+              pre.bot && pre.profile.length === 0,
+              `running=${pre.running} title=${pre.title} bot=${pre.bot} profile=[${pre.profile}]`);
     await fn(ctx);
   }
 } catch (err) {

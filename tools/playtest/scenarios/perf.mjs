@@ -6,6 +6,12 @@
 // against a machine-local baseline rather than an absolute threshold, because an
 // absolute number is unfalsifiable across machines; the portable signals are draw
 // calls and long-frame count, which do not vary with the hardware.
+//
+// The baseline is also a same-page-age comparison: since item 73 the sample always runs
+// on a document booted moments earlier, never on one soak has already played three runs
+// in. That made no measurable difference on a vsync-capped machine, but a baseline
+// recorded before item 73 is measuring a warmer page — re-record rather than retune if it
+// starts to wobble.
 
 import { FPS_START, FPS_STOP } from '../probes.mjs';
 import { readFileSync, existsSync } from 'node:fs';
@@ -19,11 +25,9 @@ const SAMPLE_MS = 8000;
 export default async function perf(ctx) {
   const { cfg } = ctx;
 
-  // Runnable standalone (`--scenario perf`), not just after soak.
-  await ctx.eval(`const p = window.__probe;
-    if (!p.state.running) (document.getElementById('overCard') && !document.getElementById('overCard').classList.contains('hidden')
-      ? document.getElementById('againBtn') : document.getElementById('startBtn')).click();
-    return true;`);
+  // Since item 73 every scenario is handed a fresh page at the title card, so this is
+  // always the first run of a freshly booted document — never a continuation of soak's.
+  await ctx.eval(`document.getElementById('startBtn').click(); return true;`);
 
   // The sample must not be cut short by a death, so the player is made unkillable
   // for the ramp. This changes nothing about what is rendered — same enemies, same

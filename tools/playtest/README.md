@@ -4,7 +4,8 @@
 
 Starts its own static server and its own dedicated Chrome, plays several waves, dies,
 restarts, plays another, dies, restarts again — and asserts the things a human watching
-the screen cannot see. ~45 seconds, exits non-zero on failure, writes
+the screen cannot see. Then four more scenarios do the same for the boss waves, medals and
+short viewports. ~80 seconds on an M-series laptop, exits non-zero on failure, writes
 `.playtest/report.json`.
 
 It does **not** replace the playtest. Feel, audio, bloom intensity, readability and
@@ -46,6 +47,7 @@ Before believing any FPS number:
 | **alternating boss waves** | wave 10's ARTILLERY telegraphing, escalating, spawning its own amber minis and taking its live barrage with it when it dies — wave 5's melee fight still being the melee fight — and either boss naming itself in the recap with the name its title card drew |
 | **card reachability at 1280x700, 844x390 and 1280x950** | a CTA — or the death card's first-timer NAME row — that grew below the fold of its own scroll box, or under the sticky footer; items 47/56/57 all hit this and none of them could fail a run on it |
 | **sticky footer paint, in both states** | a footer band that lets the content behind it stay legible while the card scrolls — or that paints at all on a window where nothing overflows (item 67's property) |
+| **fresh-page precondition, per scenario** | a scenario that starts from the last one's leftovers instead of its own setup (item 73) |
 
 The state diff is the one worth understanding: two snapshots are taken **in the same
 JavaScript turn as the button click that starts a run**, so both are exactly "t = 0 of a
@@ -74,6 +76,44 @@ Three things the game itself had to learn, all in `probe` near the input handler
   change. Same `--seed` means the same waves, upgrade cards and mutators, so a failure is
   reproducible instead of anecdotal.
 
+## Scenarios are order-independent (item 73)
+
+`run.mjs` calls **`ctx.resetPage()` before every scenario**, and follows it with a
+`starts from a fresh page` check. So each scenario begins from a freshly booted document
+at the title card, with the bot injected and stopped, no run in progress, turbo 1, and no
+`neonstrike.*` keys in `localStorage`. **Any scenario may be run alone, and the list may
+be reordered, without changing a result.** The order in `SCENARIOS` is for readability.
+
+The whole contract fits in one sentence: **a reload resets everything in-page, so the only
+things `resetPage()` has to clear explicitly are the two that survive one — `localStorage`
+and the CDP `Emulation` overrides.** That is why the fix was small.
+
+It is in the *loop*, not in each scenario, on purpose: a convention every new file has to
+remember is precisely the thing that broke. Before it, `perf` left the in-page bot running
+and `medals` silently depended on that — with nobody dodging, its parked player died to
+wave 1 inside the toast-queue wait and `gameOver()` emptied the very queue the check was
+watching, so `--scenario medals` failed on its own while the default run passed. `boss` had
+to hand the bot back in teardown or fail a check two files away, `layout` had to run last
+so its viewport override and `isTouch` did not follow it, and `medals` had to run last
+because it rewrote `localStorage`. All four couplings are gone.
+
+Two things to know when writing one:
+
+- **A scenario sets up what it needs, and asserts nothing about what came before.** If it
+  needs the player to survive a wait, give it the target-dummy hp pool (`boss` and `medals`
+  both do) rather than assuming someone else left a bot dodging.
+- **Inside `layout`, the per-leg call must stay `ctx.reload()`.** `resetPage()` clears the
+  device metrics the leg just set, and every measurement would silently be the desktop
+  layout at the wrong size.
+
+Because every scenario reboots, each also restarts the seeded `Math.random` stream from the
+same point — so a scenario's waves, upgrade cards and boss-name draws are identical whether
+it runs alone or fifth. One consequence to know about: `perf` now samples a document booted
+moments earlier rather than one `soak` has already played three runs in. On a vsync-capped
+machine that changed nothing (item 73 measured 59.9 against a pre-item-73 baseline of 59.9,
+with draw calls *down*), but if a pre-item-73 `.playtest/baseline.json` starts wobbling,
+re-record it with `--save-baseline` rather than loosening the 0.8 tolerance.
+
 ## Options
 
     make playtest ARGS="--keep-open"          leave Chrome up to poke at a failure
@@ -90,7 +130,9 @@ One caution on `--keep-profile`: the profile is wiped by default, so `playerName
 never set and the death screen takes the first-timer path, which POSTs nothing. Keep a
 profile in which you once typed a name and a returning player auto-submits on death — so
 `--keep-profile` together with `--url` pointed at the live site would put bot runs on the
-real leaderboard. Don't combine those two.
+real leaderboard. Don't combine those two — and since item 73 there is a second reason:
+`resetPage()` deletes every `neonstrike.*` key before each scenario, so that combination
+would also wipe the medals, best score and name saved in the profile you kept.
 
 ## Files
 
@@ -108,7 +150,9 @@ real leaderboard. Don't combine those two.
 
 To add a check, add a field to `SNAPSHOT` in `probes.mjs` and assert on it — that is the
 cheap path, and it is cheap on purpose. A new scenario is a file in `scenarios/`
-exporting a default `async (ctx) => {}` and a line in `SCENARIOS` in `run.mjs`.
+exporting a default `async (ctx) => {}` and a line in `SCENARIOS` in `run.mjs`. It will be
+handed a fresh page — see "Scenarios are order-independent" for what it may assume and what
+it owes.
 
 `layout` (items 67, 70, 71) is the other kind of extension: a scenario that changes the
 *environment* rather than the game state. It drives `Emulation` through `ctx.send` — raw
@@ -118,11 +162,12 @@ input event**. `el.click()` would not do: on the pre-fix build the synthetic cal
 started a run with `ENTER ARENA` 100px below the fold, which is how the bug survived three
 sessions. Two things it must keep doing: `ctx.reload()` after enabling touch emulation
 (`isTouch` in `index.html` is a boot-time const, so metrics alone measure the desktop
-layout at phone size and never exercise the touch half), and `ctx.reload()` again in
-teardown — a leftover `isTouch === true` routes firing through `touchFire`, and every
-later scenario would silently stop shooting. It runs last for the same reason `medals`
-does, and it leaves `.playtest/layout-*.png` behind for the aesthetic half no check can
-make.
+layout at phone size and never exercise the touch half), and `ctx.reload()` — not
+`ctx.resetPage()`, which would clear the device metrics the leg just set. Its teardown
+reload used to be the thing that stopped a leftover `isTouch === true` from routing every
+later scenario's firing through `touchFire`; item 73 moved that guarantee into the loop, so
+the teardown now only has to prove it worked. It leaves `.playtest/layout-*.png` behind for
+the aesthetic half no check can make.
 
 Item 70 added the death card's first-timer NAME row to the same treatment, and it is the
 better example of *what* to assert. The row is not sticky — it is visible only because
@@ -165,10 +210,10 @@ Four things it must keep doing:
   card prints. At turbo 6 a 100 ms poll is ~3 s of simulated time, so topping up a 100 hp
   bar between polls loses the race with a five-shell volley and the scenario ends up
   asserting against a frozen death screen.
-- **restart the bot in teardown.** `perf` leaves it running and `medals` silently depends on
-  that: with nobody dodging, its parked player dies inside the toast-queue wait and
-  `gameOver()` empties the queue the check is watching. Stopping the bot here without
-  handing it back fails a scenario two files away.
+- **never assume the bot.** It stops the bot at entry and leaves it stopped — the whole
+  scenario is built on nobody dodging. It used to have to hand the bot back in teardown
+  because `medals` depended on `perf` leaving one running; item 73 removed that channel, so
+  a teardown is no longer this scenario's job.
 - **turbo 1 around each screenshot.** At turbo 6 the ~120 ms between aiming the camera and
   the shutter is four simulated seconds — every telegraph the frame exists to show has
   already detonated, and you photograph the crater.
@@ -194,9 +239,11 @@ must not move. Short-viewport reachability is `layout`'s job, at its own sizes.
 `neonstrike.medals` blob through `__probe.medals` so thresholds a 45-second run can never
 reach (1,000 lifetime kills, 10 finished runs) are one event away — without that they
 would ship unverified. And it calls **`ctx.reload()`**, which reboots the page and
-re-injects the bot, because "survives a reload" cannot be faked in-page. It runs last for
-both reasons: it rewrites localStorage and it reloads, so it must not perturb the leak
-diffs or the frame-time sample.
+re-injects the bot, because "survives a reload" cannot be faked in-page. Both used to make
+it a must-run-last scenario; since item 73 it rewrites and reloads a page nothing else will
+see. It also gives its parked player the target-dummy hp pool: the toast waits are seconds
+of turbo-8 simulation, and a death in one of them calls `gameOver()`, which empties the
+queue the next check reads — the coupling that made `--scenario medals` fail alone.
 
 ## Dev-only
 

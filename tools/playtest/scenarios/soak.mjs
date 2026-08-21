@@ -87,6 +87,14 @@ export default async function soak(ctx) {
 
   await ctx.eval('window.__bot.stop(); return true;');
 
+  // Which medals three played-out runs earned without any seeding. Seed-dependent, so it
+  // is reported rather than asserted — the point is that a session can see the organic
+  // award path firing. It lives here, where the play that earns them happens; `medals`
+  // used to read it off the profile this run left behind, which was one of the
+  // cross-scenario channels item 73 closed.
+  const organic = await ctx.eval('return Object.keys(window.__probe.medals.earned).join(",");');
+  ctx.log(`medals earned by ordinary play across the three runs: ${organic || '(none)'}`);
+
   // --- invariants watched the whole time --------------------------------
   ctx.check('pool conservation held all run', violations.length === 0,
             violations.length ? violations.slice(0, 4).join('; ') : 'no pooled object was dropped');

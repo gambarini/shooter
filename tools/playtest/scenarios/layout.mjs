@@ -11,14 +11,15 @@
 // run at 1280x700 rather than trusting the hit test alone. Item 70 added the death
 // card's first-timer NAME row, which item 67 could only log — see nameRowReachable.
 //
-// It runs LAST, for the same two reasons `medals` does — it reloads the page and it
-// changes the canvas size, so it must not perturb the leak diffs or the FPS sample.
-//
 // Touch emulation needs the reload: `isTouch` is a boot-time const in index.html
 // (`(pointer: coarse)`), so metrics alone would measure the desktop layout at phone
-// size and leave the `touch-action:pan-y` half of the fix unexercised. The teardown
-// reload is just as load-bearing — a leftover `isTouch === true` routes firing through
-// `touchFire` and any later scenario would silently stop shooting.
+// size and leave the `touch-action:pan-y` half of the fix unexercised.
+//
+// It used to have to run LAST, because it changes the canvas size and a leftover
+// `isTouch === true` routes firing through `touchFire` — any later scenario would have
+// silently stopped shooting. Item 73 moved that guarantee into the harness: `resetPage()`
+// clears the Emulation overrides and reboots before every scenario, so this one's
+// position no longer matters. The teardown below stays as the assertion that it worked.
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
@@ -137,6 +138,8 @@ export default async function layout(ctx) {
     await ctx.send('Emulation.setTouchEmulationEnabled', { enabled: vp.touch, maxTouchPoints: 5 });
     // Reload so `isTouch` and `body.touch` are re-derived under the emulated device,
     // and so every leg starts from the title card in the same state.
+    // `ctx.reload()`, never `ctx.resetPage()`: the latter clears the device metrics set
+    // two lines up, and every leg would silently measure the desktop layout at 1280x860.
     await ctx.reload();
     await ctx.waitFor(`innerHeight === ${vp.height} && !document.getElementById('startCard').classList.contains('hidden')`,
                       { timeout: 10_000, label: `${vp.name} title card`, poll: 100 });

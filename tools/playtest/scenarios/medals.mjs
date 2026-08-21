@@ -8,8 +8,9 @@
 // the persistent blob to one event short of each. That seeding is the whole point: without
 // it those four are unreachable inside a 45-second run and would ship unverified.
 //
-// It runs last on purpose — it reloads the page and rewrites `neonstrike.medals`, so it
-// must not disturb the leak diffs or the frame-time sample.
+// It reloads the page and rewrites `neonstrike.medals`, which used to make it a
+// must-run-last scenario; since item 73 every scenario is handed a fresh page and a clean
+// profile, so its position in the list no longer means anything.
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -20,11 +21,6 @@ const TOAST = `const t = document.getElementById('medaltoast');
 export default async function medals(ctx) {
   const toast = () => ctx.eval(TOAST).then(JSON.parse);
 
-  // What the soak + perf runs earned by simply playing. Seed-dependent, so it is reported
-  // rather than asserted — the point is that a session can see the organic path firing.
-  const organic = await ctx.eval('return Object.keys(window.__probe.medals.earned).join(",");');
-  ctx.log(`earned by ordinary play in the runs above: ${organic || '(none)'}`);
-
   // ------------------------------------------------------------------ seeded profile
   await ctx.eval(`const m = window.__probe.medals;
     for (const k of Object.keys(m.earned)) delete m.earned[k];
@@ -33,9 +29,17 @@ export default async function medals(ctx) {
 
   // ------------------------------------------------------------------ toast queue
   // Both awards land in ONE javascript turn — the same-moment case from the spec.
-  // perf forces turbo back to 1 for its sample; nothing here is timed, so wind it up —
-  // otherwise waiting for enemies to close in takes real minutes.
+  // Nothing here is timed, so wind turbo up: waiting for enemies to close in at 1 would
+  // take real minutes.
+  //
+  // The player is a target dummy for the whole scenario (a huge hp pool, the shape `boss`
+  // uses). Every wait below is measured in toast seconds, which at turbo 8 is a lot of
+  // simulated time for a parked player to survive — and a death mid-wait calls gameOver(),
+  // which EMPTIES the very toast queue the next check reads. This used to be borrowed
+  // instead: `perf` left the in-page bot running, and a dodging bot kept the player alive
+  // by accident, so `--scenario medals` on its own failed (item 73).
   await ctx.eval(`const p = window.__probe; p.driven = true; p.turbo = 8; p.fn.startGame();
+    p.player.maxHp = 1e7; p.player.hp = 1e7;
     p.fn.awardMedal('exterminator'); p.fn.awardMedal('stylist'); return true;`);
   let t = await toast();
   ctx.check('two medals at once: the first one shows', t.show && /EXTERMINATOR/.test(t.name), t.name);
@@ -81,8 +85,9 @@ export default async function medals(ctx) {
             await ctx.eval('return !!window.__probe.medals.earned.survivor;'));
 
   // ------------------------------------------------------------------ UNTOUCHABLE's flag
-  await ctx.eval(`window.__probe.fn.startWave(6); return true;`);
-  const clean1 = await ctx.eval('return window.__probe.state.waveClean;');
+  // Read in the SAME eval as the startWave: at turbo 8 a second round-trip is seconds of
+  // simulated time, and the parked dummy would have been shot before the flag was read.
+  const clean1 = await ctx.eval(`window.__probe.fn.startWave(6); return window.__probe.state.waveClean;`);
   await ctx.eval(`window.__probe.fn.damagePlayer(1); return true;`);
   const clean2 = await ctx.eval('return window.__probe.state.waveClean;');
   ctx.check('UNTOUCHABLE: a new wave starts clean and any hit taken ends it',
