@@ -1957,6 +1957,10 @@ const bulwarkShieldGeo = new THREE.BoxGeometry(2.4, 2.6, 0.16);
 // the damage-flash effect writes mesh.scale directly, so scale can't carry size.
 const splitterGeo = new THREE.IcosahedronGeometry(1.65, 0);
 const miniGeo = new THREE.IcosahedronGeometry(0.6, 0);
+// Item 72 — the ARTILLERY's minis get their own silhouette: a squat, wide-based octagonal
+// drum that reads as a shrunken siege hull, so a deployment is never mistaken for a
+// splitter's brood at a glance. Same radius (0.7) as the teal mini, so nothing else moves.
+const siegeMiniGeo = new THREE.CylinderGeometry(0.45, 0.72, 0.7, 8);
 const bossGeo = new THREE.DodecahedronGeometry(3.0, 0);
 // Item 45 — the ARTILLERY boss's silhouette: a broad eight-sided siege hull, a squat
 // turret and two raised barrels. Wide and low where the melee boss is a tall spiky ball,
@@ -1964,7 +1968,7 @@ const bossGeo = new THREE.DodecahedronGeometry(3.0, 0);
 const artilleryGeo = new THREE.CylinderGeometry(2.6, 3.6, 2.4, 8);
 const artilleryTurretGeo = new THREE.CylinderGeometry(1.4, 1.9, 1.3, 8);
 const artilleryBarrelGeo = new THREE.CylinderGeometry(0.3, 0.4, 3.0, 8);
-const SHARED_ENEMY_GEO = new Set([chaserGeo, shooterGeo, exploderGeo, waspGeo, bulwarkGeo, bulwarkShieldGeo, splitterGeo, miniGeo, bossGeo,
+const SHARED_ENEMY_GEO = new Set([chaserGeo, shooterGeo, exploderGeo, waspGeo, bulwarkGeo, bulwarkShieldGeo, splitterGeo, miniGeo, siegeMiniGeo, bossGeo,
                                   artilleryGeo, artilleryTurretGeo, artilleryBarrelGeo]);
 // Free the per-enemy material, plus the core child's unique geometry/material and its light.
 function disposeEnemy(e) {
@@ -2082,19 +2086,24 @@ function spawnEnemy(wave) {
 // death (never counted in state.toSpawn — wave-clear keys off enemies.length and
 // they're pushed synchronously inside killEnemy, so the wave can't end early).
 // Flat 15 hp keeps them one-blaster-shot at any wave.
-function spawnMini(pos, i, n) {
-  const hue = 0x1fffc3;
-  const mat = new THREE.MeshStandardMaterial({ color: 0x07140f, emissive: hue, emissiveIntensity: 0.9,
+// Item 72: `siege` swaps the identity, never the lifecycle — the ARTILLERY deploys the
+// same record through the same code path, wearing its own hue, hull and core so the two
+// broods are told apart on sight (and on the minimap, and in their death burst, which both
+// read `color` straight off the record).
+function spawnMini(pos, i, n, siege = false) {
+  const hue = siege ? ART_HUE : 0x1fffc3;
+  const mat = new THREE.MeshStandardMaterial({ color: siege ? 0x1a0d00 : 0x07140f, emissive: hue, emissiveIntensity: 0.9,
                                                metalness: 0.4, roughness: 0.3, flatShading: true });
-  const mesh = new THREE.Mesh(miniGeo, mat);
+  const mesh = new THREE.Mesh(siege ? siegeMiniGeo : miniGeo, mat);
   const a = (i / n) * Math.PI * 2 + Math.random() * 0.6;   // radial scatter; separation pass settles the rest
   mesh.position.set(pos.x + Math.cos(a) * 1.4, 1.0, pos.z + Math.sin(a) * 1.4);
   collideArena(mesh.position, 0.7);
-  const core = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 8), new THREE.MeshBasicMaterial({ color: 0x8aff3a }));
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 8),
+                              new THREE.MeshBasicMaterial({ color: siege ? 0xffe23a : 0x8aff3a }));
   mesh.add(core);
   scene.add(mesh);
   enemies.push({
-    mesh, core, type: 'chaser', mini: true,
+    mesh, core, type: 'chaser', mini: true, siege,
     hp: 15, maxHp: 15,
     speed: (8.5 + Math.random() * 1.5) * (state.mutator ? state.mutator.speedMul || 1 : 1),
     radius: 0.7, spin: Math.random() * 4 - 2, bob: Math.random() * Math.PI * 2,
@@ -3316,7 +3325,7 @@ function update(dt) {
           if (minis < ART_MINI_CAP) {
             e.miniCD = ART_MINI_CD;
             const n = 2 + (Math.random() < 0.5 ? 1 : 0);
-            for (let k = 0; k < n; k++) spawnMini(e.mesh.position, k, n);
+            for (let k = 0; k < n; k++) spawnMini(e.mesh.position, k, n, true);
             sfx.split();
           } else e.miniCD = 2;
         }
@@ -3337,7 +3346,7 @@ function update(dt) {
             const aim = new THREE.Vector3(Math.sin(ang), -0.04, Math.cos(ang)).normalize();
             const origin = e.mesh.position.clone().add(aim.clone().multiplyScalar(3.4));
             origin.y = 2.4;
-            spawnEnemyShot(origin, aim, 'BOSS');
+            spawnEnemyShot(origin, aim, e.bossName + ' VOLLEY');
           }
         }
       }
@@ -3520,9 +3529,10 @@ function update(dt) {
     if ((e.type === 'chaser' || e.type === 'boss' || e.type === 'splitter') && dist < e.radius + player.radius + 0.4) {
       if (!e._cool || t - e._cool > 0.6) {
         e._cool = t; damagePlayer(e.type === 'boss' ? 22 : e.mini ? 8 : 12, e.mesh.position,
-          // The artillery names itself: 'BOSS' belongs to the melee fight, and the recap
-          // has to say which of the two flattened you.
-          e.type === 'boss' ? (e.bossKind === 'artillery' ? e.bossName : 'BOSS') : (e.elite ? 'ELITE ' : '') + (e.mini ? 'MINI' : e.type === 'splitter' ? 'SPLITTER' : 'CHASER'));
+          // Item 72: both bosses name themselves. `bossName` is the string the title card
+          // drew, so the recap always agrees with the card that announced the fight — and
+          // a generic 'BOSS' can no longer stand in for either of the two.
+          e.type === 'boss' ? e.bossName : (e.elite ? 'ELITE ' : '') + (e.mini ? 'MINI' : e.type === 'splitter' ? 'SPLITTER' : 'CHASER'));
         e.mesh.position.x -= toP.x * 2; e.mesh.position.z -= toP.z * 2;
       }
     }
@@ -3765,7 +3775,7 @@ function drawMinimap() {
   // enemies
   for (const e of enemies) {
     const [px, pz] = w2m(e.mesh.position.x, e.mesh.position.z);
-    mctx.fillStyle = e.type === 'boss' ? (e.bossKind === 'artillery' ? '#ff8c14' : '#ffe23a') : e.type === 'shooter' ? '#b04bff' : e.type === 'exploder' ? '#8aff3a' : e.type === 'wasp' ? '#3af0ff' : e.type === 'bulwark' ? '#ff7a1a' : e.type === 'splitter' || e.mini ? '#1fffc3' : '#ff2e88';
+    mctx.fillStyle = e.type === 'boss' ? (e.bossKind === 'artillery' ? '#ff8c14' : '#ffe23a') : e.type === 'shooter' ? '#b04bff' : e.type === 'exploder' ? '#8aff3a' : e.type === 'wasp' ? '#3af0ff' : e.type === 'bulwark' ? '#ff7a1a' : e.mini && e.siege ? '#ff8c14' : e.type === 'splitter' || e.mini ? '#1fffc3' : '#ff2e88';
     mctx.beginPath(); mctx.arc(px, pz, (e.type === 'boss' ? 5 : e.type === 'bulwark' ? 3.4 : e.type === 'splitter' ? 3.2 : e.mini ? 1.8 : 2.6) * (e.elite ? 1.4 : 1), 0, 7); mctx.fill();
   }
   // Player triangle. The tip is drawn at local (0,-6); canvas rotate(θ) sends it to

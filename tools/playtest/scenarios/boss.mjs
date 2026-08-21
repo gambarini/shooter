@@ -81,7 +81,8 @@ const STATUS = `const p = window.__probe;
                 dist: +Math.hypot(b.mesh.position.x - p.player.pos.x,
                                   b.mesh.position.z - p.player.pos.z).toFixed(1) } : null,
     marks: p.live.mortarMarks.length, markPool: p.pools.mortarMarkPool.length,
-    minis: p.enemies.filter(e => e.mini).length, enemies: p.enemies.length,
+    minis: p.enemies.filter(e => e.mini).length,
+    siegeMinis: p.enemies.filter(e => e.mini && e.siege).length, enemies: p.enemies.length,
     shots: p.live.enemyShots.length, lights,
     dmgTaken: Math.round(p.state.stats.dmgTaken), lastHitBy: p.state.lastHitBy,
     card: document.querySelector('#bosscard .bc-name').textContent,
@@ -163,6 +164,12 @@ export default async function boss(ctx) {
   s = await status();
   ctx.check('the artillery spawns minis, and they count toward the wave',
             s.minis >= 2 && s.enemies === s.minis + 1, `${s.minis} minis, ${s.enemies} enemies alive`);
+  // Item 72: every mini the ARTILLERY deploys wears its own identity, not the splitter's.
+  // The flag drives the hue, the hull, the minimap dot and the death burst; whether that
+  // actually reads at a glance is the screenshot's job, not this check's.
+  ctx.check('the artillery deploys ITS minis, not the splitter\'s',
+            s.minis > 0 && s.siegeMinis === s.minis, `${s.siegeMinis}/${s.minis} siege-marked`);
+  await shot(ctx, 'artillery-minis');
 
   // ------------------------------------------------------------------ phase 2
   // bossEnrage fires from inside damageEnemy, so drive it through the real damage path.
@@ -236,6 +243,20 @@ export default async function boss(ctx) {
   // still be firing the volleys it always fired.
   ctx.check('the melee boss fires no mortars at all', meleeMarks === 0, `${meleeMarks} marks seen`);
   ctx.check('the melee boss still fires its volleys', meleeShots > 0, `${meleeShots} shots in the air`);
+
+  // Item 72: the melee boss names itself too. Nothing else in this leg can hurt the dummy
+  // (the wave's own queue was zeroed), so whatever `lastHitBy` holds came from the boss —
+  // and it has to start with the name the title card just drew, whichever of its two
+  // attacks landed first: the contact hit is the bare name, the volley is `NAME VOLLEY`.
+  // Asserted against the record, never a literal — the pool is drawn at random.
+  const meleeName = s.boss && s.boss.name;
+  await ctx.waitFor(`(window.__probe.state.lastHitBy || '').length > 0`,
+                    { timeout: 30_000, poll: 150, label: 'the melee boss to land a hit',
+                      onPoll: () => ctx.eval(`window.__probe.player.hp = window.__probe.player.maxHp; return true;`) });
+  s = await status();
+  ctx.check('the melee boss names itself in the recap, matching its card',
+            !!meleeName && (s.lastHitBy || '').startsWith(meleeName),
+            `FLATLINED BY: ${s.lastHitBy} (card "${meleeName}")`);
 
   // ------------------------------------------------------------------ a crowded wave 10
   // The isolation every check above depends on is also the thing that could hide a broken
