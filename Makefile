@@ -37,18 +37,12 @@ test:
 	@node --test lib/leaderboard-core.test.mjs
 
 # Unattended browser playtest (roadmap item 58) — the automated half of the
-# verification recipe. Starts its own static server and its own dedicated Chrome,
-# plays several waves, dies, restarts, plays another, and asserts the things a human
-# watching the screen cannot see: that a restart begins byte-identical to a fresh
-# run, that no pooled object was dropped, that the point-light budget held, and what
-# the frame times looked like under shotgun spam.
+# verification recipe.
 #
-# It does NOT replace the playtest — feel, audio, bloom intensity and anything
-# aesthetic still need a human. It replaces the part that was being skipped.
-#
-#   make playtest                        the default soak + perf run
-#   make playtest ARGS="--keep-open"     leave Chrome up to poke at a failure
-#   make playtest ARGS="--seed 7"        a different but still reproducible run
-#   make playtest ARGS="--url https://neon-strike-7b6.pages.dev/"   smoke the live site
+# tools/playtest/README.md owns what it runs, what it checks and every ARGS
+# option; CLAUDE.md's "Run / verify" owns when it is required and what it cannot
+# judge. Keep both out of this comment — a third copy of that paragraph is how
+# the first one drifted (item 74). `node tools/playtest/run.mjs --help` prints
+# the flags.
 playtest:
 	@node tools/playtest/run.mjs $(ARGS)

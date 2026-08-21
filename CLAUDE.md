@@ -42,20 +42,16 @@ above is wrong — fix the split rather than writing the sentence twice.
 
 ### The automated half — `make playtest`
 
-~45s: its own static server and its own dedicated Chrome, several waves, two death/restart
-cycles, asserting the invariants a human watching the screen cannot see — leaks, pool
-conservation, the point-light budget, console errors, frame time. Exits non-zero on
-failure.
-
-**`tools/playtest/README.md` is the reference** — the full check list, every option, and how
-to extend it. Read it before touching the rig. If the harness cannot check something your
-item needs, add a scenario or a `SNAPSHOT` field there; never hand-roll a throwaway script
-(the README says why, and it is this repo's most-repeated mistake).
+**`tools/playtest/README.md` owns the harness** — what it runs, how long it takes, what it
+asserts, every option, and how to extend it. Nothing about it is described here; this file
+says only *when* the run is required (the bullet above) and why its verdict is not the whole
+verdict (below). Read the README before touching the rig, and if the harness cannot check
+what your item needs, extend it — never hand-roll a script beside it.
 
 ### The human half — still required
 
-`make playtest` passing is not "verified". It runs with the pause handlers disabled
-(`probe.driven`) and it cannot judge anything aesthetic.
+`make playtest` passing is not "verified": a green run judges nothing aesthetic, and it
+cannot reach the paths below.
 
 1. **Play it**: start a run → 3+ waves → die or restart → 1+ more wave. Test a fresh run
    **AND** a restart — most state-leak bugs only show on the second run.
