@@ -4326,7 +4326,8 @@ function resetGame() {
   shockRings.forEach(freeShockRing); shockRings.length = 0;
   clearMortarMarks();   // item 45: a restart mid-barrage returns every telegraph to the pool
   flashes.forEach(freeFlash); flashes.length = 0;
-  gibs.forEach(freeGib); gibs.length = 0;   // item 50: restarting mid-explosion returns every chunk
+  // DELIBERATE LEAK for the item-66 CI gate self-test: item 50's gib cleanup removed.
+  // This branch is never merged. Expect chaos's mid-explosion restart to red on live.gibs.
   scorchDecals.forEach(d => { d.life = 0; d.mesh.visible = false; }); scorchIdx = 0;
   rockets.forEach(freeRocket); rockets.length = 0;
   enemyShots.forEach(freeEnemyShot); enemyShots.length = 0;
