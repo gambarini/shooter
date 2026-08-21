@@ -5,8 +5,7 @@ Single-file 3D arena wave shooter. All code lives in `index.html` (CSS → HUD m
 dependencies. The game has no unit tests — it is verified by `make playtest` (automated
 browser run, item 58) plus playing it. The only unit-tested code is the leaderboard
 backend's pure core (`lib/leaderboard-core.mjs`), covered by
-`lib/leaderboard-core.test.mjs` under plain `node --test`; the deploy workflow runs it as a
-gate, so it must stay green.
+`lib/leaderboard-core.test.mjs` under plain `node --test` (see `make test` below).
 
 ## Where each instruction lives
 
@@ -22,7 +21,8 @@ missed the fourth; item 60 needed a whole extra commit to repair a cross-referen
 | Notion addresses (HQ, Roadmap, Session Log, data source IDs) | **this file** |
 | *What* to build: item specs, phase order, dependencies, Session Log entry format, `Spot-checks owed` semantics | **the Notion HQ page** |
 | `/roadmap-item` modes, the fan-out topology, the two workflow invocations | **`.claude/skills/roadmap-item/SKILL.md`** |
-| The playtest harness: what it checks, how it drives the game, how to extend it | **`tools/playtest/README.md`** |
+| The playtest harness: what it runs, how long it takes, what it checks, its options, how to extend it | **`tools/playtest/README.md`** |
+| *Why* each `make` recipe is written the way it is (the staging, the copies, the explicit filename), and what the internal targets (`schema`) do | **the `Makefile` comments** |
 
 Notion owns *what to build*; the repo owns *how to work*.
 
@@ -31,12 +31,15 @@ above is wrong — fix the split rather than writing the sentence twice.
 
 ## Run / verify
 
-- `make serve` → http://localhost:8000 (static only: `/api/scores` 404s, board shows
-  OFFLINE). `open index.html` works too, but pointer lock is more reliable over http.
-- `make dev` → http://localhost:8788 — the full stack, including the leaderboard Function
-  against a real local D1. Use this whenever a change touches `functions/` or `lib/`.
-- `make test` → the leaderboard core's unit tests (the same command CI gates deploys on).
-  Required whenever a change touches `lib/` or `functions/`.
+- `make serve` → http://localhost:8000 — fastest way to just play: static only, so
+  `/api/scores` 404s and the board shows OFFLINE. `open index.html` works too, but pointer
+  lock is more reliable over http.
+- `make dev` → http://localhost:8788 — the full stack: the leaderboard Function against a
+  real local D1, and the `_headers` CSP actually applied. Use this whenever a change touches
+  `functions/` or `lib/`.
+- `make test` → the leaderboard core's unit tests. Required whenever a change touches
+  `lib/` or `functions/`, and it must stay green regardless: CI runs this same command as a
+  deploy gate.
 - `make playtest` → the unattended browser playtest. Required after any change to
   `index.html`.
 
