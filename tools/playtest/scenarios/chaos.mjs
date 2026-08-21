@@ -65,15 +65,25 @@ const release = code => `document.dispatchEvent(new KeyboardEvent('keyup', { cod
 const ARM = `const p = window.__probe;
   p.driven = true; p.player.maxHp = 1e7; p.player.hp = 1e7; return true;`;
 
-// Clear the arena to whatever the moment needs and nothing else, exactly as boss.mjs does:
-// kill what is alive, zero the spawn queue, then jump to the wave in question. Without it
-// the ordinary queue keeps feeding enemies into a fight the moment is not about.
+// Clear the arena to whatever the moment needs and nothing else, as boss.mjs does: kill
+// what is alive and stop the ordinary queue feeding enemies into a fight the moment is not
+// about. But leave ONE enemy permanently pending rather than zeroing the queue, because
+// `nextWaveCheck` fires on `toSpawn === 0 && enemies.length === 0` and an emptied wave
+// clears on the very next frame — which runs `clearMutator()` and `showUpgrades()`.
+//
+// That is a one-frame race, and it is the difference between a moment and a mirage. It won
+// on a laptop and lost on a CI runner, where "during a mutator wave" reported `mutator ===
+// null` and failed the run. Two of the moments here depend on it: the mutator wave clears
+// itself the instant it is jumped to, and the boss-kill slow-mo clears the wave the instant
+// the boss dies. `ab` learned the same lesson from the same function — if a scenario needs
+// a wave to STAY on screen, this is the idiom.
 const jumpTo = wave => `const p = window.__probe;
   p.turbo = 1;
   p.enemies.slice().forEach(e => p.fn.damageEnemy(e, 1e9, null, false, null, 0, 'HARNESS'));
   p.state.toSpawn = 0;
   p.fn.startWave(${wave});
-  p.state.toSpawn = 0;
+  p.state.toSpawn = 1; p.state.spawnTimer = 1e9;   // pending forever: spawns nothing, clears never
+  p.state.betweenWaves = 0;
   return true;`;
 
 const MOMENTS = [
