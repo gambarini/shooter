@@ -4537,6 +4537,11 @@ window.__probe = {
         // board landing under it?" case would go unchecked. This lets the layout
         // scenario draw a synthetic board with no network.
         renderGlobalBoard },
+  // Item 64 — the boss intro is a module-level countdown driven from animate(), so it is
+  // the one hostile moment the chaos scenario cannot see from state, mods or the DOM: the
+  // card is hidden by gameOver() while the timer (and the FOV punch it owns) keeps running.
+  // resetGame clears both; this is what lets a check say so.
+  get bossIntroT() { return bossIntroT; },
   setKey:  (code, down) => { keys[code] = !!down; },
   setFire: (v) => { mouseDown = !!v; },
   // Aim straight at a world point. Matches the forward vector animate() builds from

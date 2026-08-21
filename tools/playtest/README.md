@@ -4,9 +4,9 @@
 
 Starts its own static server and its own dedicated Chrome, plays several waves, dies,
 restarts, plays another, dies, restarts again — and asserts the things a human watching
-the screen cannot see. Then four more scenarios do the same for the boss waves, medals and
-short viewports. ~80 seconds on an M-series laptop, exits non-zero on failure, writes
-`.playtest/report.json`.
+the screen cannot see. Then five more scenarios do the same for hostile restarts, the boss
+waves, medals and short viewports. ~2 minutes on an M-series laptop, exits non-zero on
+failure, writes `.playtest/report.json`.
 
 It does **not** replace the playtest. Feel, audio, bloom intensity, readability and
 anything aesthetic still need a human, and the Session Log should still say what
@@ -43,6 +43,7 @@ Before believing any FPS number:
 | idle-DOM snapshot | CSS-only leaks like item 56's damage flash |
 | console / exceptions / failed requests | anything the page logged, including CSP violations |
 | frame times under shotgun spam | jank, stalls, and FPS/draw-call regression vs a local baseline |
+| **hostile restarts** | a restart, death or pause taken mid-explosion, mid-boss-intro, mid-upgrade-screen, mid-reload, mid-dash, mid-mutator or inside the boss-kill slow-mo — plus a monkey pass of random input |
 | **medal award / persistence** | a medal that re-toasts, does not persist, or a recap grid that mislabels earned vs unearned |
 | **alternating boss waves** | wave 10's ARTILLERY telegraphing, escalating, spawning its own amber minis and taking its live barrage with it when it dies — wave 5's melee fight still being the melee fight — and either boss naming itself in the recap with the name its title card drew |
 | **card reachability at 1280x700, 844x390 and 1280x950** | a CTA — or the death card's first-timer NAME row — that grew below the fold of its own scroll box, or under the sticky footer; items 47/56/57 all hit this and none of them could fail a run on it |
@@ -119,7 +120,7 @@ re-record it with `--save-baseline` rather than loosening the 0.8 tolerance.
     make playtest ARGS="--keep-open"          leave Chrome up to poke at a failure
     make playtest ARGS="--seed 7"             a different, still reproducible run
     make playtest ARGS="--waves 6 --turbo 8"  a longer soak
-    make playtest ARGS="--scenario perf"      one scenario (default: soak,perf,boss,medals,layout)
+    make playtest ARGS="--scenario perf"      one scenario (default: soak,chaos,perf,boss,medals,layout)
     make playtest ARGS="--save-baseline"      record this machine's perf numbers
     make playtest ARGS="--headless"           SwiftShader: logic and leaks only, FPS meaningless
     make playtest ARGS="--url https://neon-strike-7b6.pages.dev/"   smoke the live site
@@ -143,6 +144,7 @@ would also wipe the medals, best score and name saved in the profile you kept.
     bot.js             the in-page autoplay bot (injected as a plain script)
     probes.mjs         probe expressions + the assertions over them
     scenarios/soak.mjs the play/die/restart loop and the leak comparisons
+    scenarios/chaos.mjs restarting, dying and pausing at hostile moments (item 64)
     scenarios/perf.mjs the frame-time sample under shotgun spam
     scenarios/boss.mjs the wave 5 / wave 10 boss fights (item 45)
     scenarios/medals.mjs medal awards, the toast queue and the recap grid (item 41)
@@ -194,6 +196,40 @@ lives on a `::before`, so the check reads `getComputedStyle(row, '::before')` in
 states and a tail check fails the scenario if a run only ever saw one of them — "opacity
 0, no band" is also what a rule that never applied looks like, and a single-state check
 could not tell the two apart.
+
+`chaos` (item 64) is the shape for a scenario that reuses every existing assertion and
+changes only *when* they are taken. `soak` restarts at tidy moments; read the comments in
+`resetGame` and almost every one records a bug that only appeared when the player restarted
+*during* an animation. So `chaos` walks a list of hostile moments and, at each, runs the
+three verbs a player has — pause and come back, die, restart — with item 58's t = 0 reset
+diff and pool-conservation law unchanged. Four things it must keep doing:
+
+- **Reach each moment deterministically.** `startWave(5)` for the boss, `startWave(7)` for
+  a mutator, `showUpgrades()` for the cards. Never "play until the seed produces one": a
+  seed-dependent moment is a flaky check, and a flaky check in the CI gate (item 66) is a
+  gate somebody disables.
+- **Fail if a moment was never observed**, and read that observation when the moment is
+  *reached*, not at the restart. `gameOver()` clears `state.choosing` and `state.mutator`
+  itself, so asking at the restart would report "never observed" for exactly the moments
+  whose teardown is under test.
+- **`.click()` on `againBtn`, not a dispatched hit-tested event.** A restart taken
+  mid-`choosing` leaves the upgrade overlay above the death card; this is the one place in
+  the rig where bypassing hit-testing is correct, and it is the opposite of what
+  `layout` needs. Don't unify them.
+- **Real `KeyboardEvent`s in the monkey pass, and no Escape or KeyP.** `probe.setKey`
+  writes the `keys` map directly and so reaches nothing that lives in the keydown
+  *handler* — Q (dash) and E (nova) set their intent flags there and setKey can never
+  trigger either. Escape and KeyP are excluded because `driven` stands down only the
+  game's *automatic* pauses: one stray press parks an unattended run on the pause card and
+  every later wait times out. Pause is tested as its own verb instead, where the resume is
+  guaranteed.
+
+Its monkey pass runs **twice**, for the same reason soak's GPU comparison is its second
+restart: pass 1 is the first thing in the scenario to play long enough to reach pickups,
+novas and a full spawn cycle, so it mints the geometry those paths own (15 geometries and
+3 textures, measured) and a comparison across it reads warm-up as a leak. Pass 2 does the
+identical work on warm pools and adds nothing, which is what makes the GPU check across it
+tight enough to mean something.
 
 `boss` (item 45) is the third shape: a scenario about a fight the ordinary run never
 reaches. The soak clears four waves and dies, so wave 5 and wave 10 were unverified

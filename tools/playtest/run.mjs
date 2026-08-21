@@ -3,7 +3,7 @@
 //
 //   node tools/playtest/run.mjs [options]        # or: make playtest
 //
-//   --scenario soak,perf   which scenarios to run, in order (default: soak,perf,boss,medals,layout)
+//   --scenario soak,perf   which scenarios to run, in order (default: soak,chaos,perf,boss,medals,layout)
 //   --waves N              waves to clear in run 1 before dying (default 4)
 //   --perf-wave N          wave to reach before the FPS sample (default 6)
 //   --turbo N              sim sub-steps per frame while playing, 1..8 (default 6)
@@ -31,15 +31,16 @@ import perf from './scenarios/perf.mjs';
 import boss from './scenarios/boss.mjs';
 import medals from './scenarios/medals.mjs';
 import layout from './scenarios/layout.mjs';
+import chaos from './scenarios/chaos.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
 const OUT = join(ROOT, '.playtest');
-const SCENARIOS = { soak, perf, boss, medals, layout };
+const SCENARIOS = { soak, chaos, perf, boss, medals, layout };
 
 // ---------------------------------------------------------------- args
 function parseArgs(argv) {
-  const cfg = { scenario: 'soak,perf,boss,medals,layout', waves: 4, perfWave: 6, turbo: 6, seed: 1,
+  const cfg = { scenario: 'soak,chaos,perf,boss,medals,layout', waves: 4, perfWave: 6, turbo: 6, seed: 1,
                 url: null, headless: false, keepOpen: false, saveBaseline: false,
                 keepProfile: false, pointLightCap: 8 };
   for (let i = 0; i < argv.length; i++) {

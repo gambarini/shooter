@@ -25,6 +25,12 @@ export const SNAPSHOT = `
     state: JSON.parse(JSON.stringify(p.state)),
     mods: JSON.parse(JSON.stringify(p.mods)),
     player: { hp: p.player.hp, maxHp: p.player.maxHp, invuln: +p.player.invuln.toFixed(3) },
+    // Item 64 — the two things a restart taken DURING the boss intro leaves behind. Neither
+    // lives on state or in the DOM: the countdown is a module-level let that animate()
+    // owns, and the FOV punch is written straight onto the camera. The || 0 is there
+    // because --url can point at a build older than the getter.
+    // (No backticks in this string: SNAPSHOT is itself a template literal.)
+    anim: { bossIntroT: +(p.bossIntroT || 0).toFixed(2), fov: +p.camera.fov.toFixed(2) },
     weapons: p.weapons.map(w => ({ name: w.name, mag: w.mag, magSize: w.magSize,
                                    reserve: w.reserve === Infinity ? 'inf' : w.reserve })),
     // Item 56 was a damage-flash that survived a reset, so the "should be idle" DOM
