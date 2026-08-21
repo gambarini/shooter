@@ -76,11 +76,24 @@ jobs:
         # --no-sandbox because Ubuntu 24.04 restricts the unprivileged user namespaces
         # Chrome's sandbox needs; it is opt-in precisely so local runs keep theirs.
         #
-        # The one known flake risk is the unpkg CDN: index.html imports three.js from
-        # it, so a CDN outage reads here as "the engine never booted". If that starts
-        # happening, fix it at the source — a gate that fails randomly gets disabled,
-        # and then nothing is gated.
-        run: node tools/playtest/run.mjs --headless --no-sandbox --scenario soak,chaos
+        # --window 800,600 --waves 3 is the FLAKE FIX, and it is not a loosened
+        # assertion — it is less work, not less checking. Every check in soak and chaos
+        # is identical at any canvas size: the same scene, the same entities, the same
+        # draw calls. What changes is fill rate, and with no GPU on a runner that
+        # dominates everything. The first PR to run this gate timed out at
+        # "run 1 reaching wave 4" after 300 s at 1280x860, while the push to main that
+        # preceded it finished the same work in 250 s — a >2x swing between two runs of
+        # the same commit, which is ordinary runner variance and exactly the kind of
+        # margin a gate cannot live on. 2.3x fewer pixels and one wave less puts the job
+        # around 60 s of headless play with roughly 3x headroom on the timeout.
+        # Do NOT copy these flags into a local perf run: the FPS baseline is only
+        # comparable at the default window size.
+        #
+        # The remaining known flake risk is the unpkg CDN: index.html imports three.js
+        # from it, so a CDN outage reads here as "the engine never booted". If that
+        # starts happening, fix it at the source — a gate that fails randomly gets
+        # disabled, and then nothing is gated.
+        run: node tools/playtest/run.mjs --headless --no-sandbox --window 800,600 --waves 3 --scenario soak,chaos
 
       - name: Upload the playtest report on failure
         if: failure()

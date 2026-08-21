@@ -126,6 +126,7 @@ re-record it with `--save-baseline` rather than loosening the 0.8 tolerance.
     make playtest ARGS="--save-baseline"      record this machine's perf numbers
     make playtest ARGS="--headless"           SwiftShader: logic and leaks only, FPS meaningless
     make playtest ARGS="--no-sandbox"        drop Chrome's sandbox — CI containers only
+    make playtest ARGS="--window 800,600"    smaller canvas; headless logic runs only
     make playtest ARGS="--url https://neon-strike-7b6.pages.dev/"   smoke the live site
 
 `node tools/playtest/run.mjs --help` prints the full list.
@@ -327,6 +328,11 @@ Chrome's own window stays at `--window-size=1280,860` (`chrome.mjs`), and that i
 longer a workaround for the title card: the frame-time sample is only comparable to a
 machine-local baseline recorded at the same canvas size, so the viewport perf measures
 must not move. Short-viewport reachability is `layout`'s job, at its own sizes.
+
+`--window WxH` (item 66) moves it anyway, for headless LOGIC runs only. Every check in
+`soak` and `chaos` is identical at any canvas size — same scene, same entities, same draw
+calls — and what changes is fill rate, which under SwiftShader's CPU renderer dominates
+everything. Never pass it to a run whose FPS number you intend to compare to anything.
 
 `medals` shows the two moves a scenario about *persistence* needs. It **seeds** the
 `neonstrike.medals` blob through `__probe.medals` so thresholds a 45-second run can never
