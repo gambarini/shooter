@@ -48,6 +48,11 @@ export async function launch({ profileDir, headless = false, keepProfile = false
     // The game synthesises all audio through WebAudio; without this the context
     // stays suspended and `initAudio` throws on some builds.
     '--autoplay-policy=no-user-gesture-required',
+    // Not a cosmetic setting. The FPS sample is only comparable to a baseline recorded at
+    // the same canvas size, so a real perf run must keep the default — but the cost is
+    // fill rate, and under SwiftShader (no GPU) that dominates everything. `--window`
+    // exists for headless LOGIC runs, where nothing asserts a frame time and a smaller
+    // canvas is the difference between a CI job that finishes and one that times out.
     `--window-size=${window}`, '--window-position=0,0',
     'about:blank',
   ];
