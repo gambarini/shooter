@@ -4613,8 +4613,12 @@ function resetGame() {
   state.score = 0; state.wave = 0; state.combo = 1; state.comboTimer = 0;
   state.toSpawn = 0; state.betweenWaves = 0; state.pickupTimer = 8; state.shake = 0;
   state.time = 0; state.slowmo = 0; state.choosing = false; state.rerolled = false; state.mutator = null;
-  // Item 82: drop a reconfigure caught mid-sink and put the wave-1 floor back, whole. The
-  // player is already parked at (0, EYE, 30) above, so no footprint can be standing on it.
+  // Item 82: drop a reconfigure caught mid-sink and put the wave-1 floor back — WHOLE.
+  // Unguarded on purpose: a restart owes the player the wave-1 arena, not the wave-1 arena
+  // minus whichever box the dead run happened to end on. That is safe only because the
+  // player is parked at (0, EYE, 30) forty lines up, before this runs. The `arena`
+  // scenario resets from SCATTER's centre block precisely so that ordering is a check
+  // rather than a comment.
   state.nextMutator = null; snapLayout(1, null);
   setMood(1, true);   // item 28: snap arena mood back to the wave-1 baseline on restart
   resetEnv();         // item 31: settle trims/caps/dust glitch state to idle

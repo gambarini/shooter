@@ -227,11 +227,25 @@ export default async function arena(ctx) {
 
   // ---- 7. a restart snaps back to the wave-1 floor --------------------------
   await at(ctx, 22);
-  await ctx.eval('window.__probe.fn.resetGame(); return true;');
+  // Standing on SCATTER's centre block first, and that is the point of the leg rather
+  // than decoration. resetGame's snap runs UNGUARDED — it must put the whole wave-1
+  // floor back, not a floor with a hole where the dead run's player happened to stop —
+  // and it gets away with that only because it parks the player at (0, EYE, 30) several
+  // lines earlier. Reset from (0, 64), as the previous version of this check did, and
+  // that ordering is not exercised at all: (0, 64) is clear of every SCATTER box, so
+  // the check passes whether or not resetGame ever moved anybody. From (0, 0) it does
+  // not: turn the guard on, or move the player park below the snap, and the centre
+  // block goes missing from the signature.
+  const spawn = JSON.parse(await ctx.eval(`const p = window.__probe;
+    p.player.pos.x = 0; p.player.pos.z = 0;
+    p.fn.resetGame();
+    return JSON.stringify({ x: +p.player.pos.x.toFixed(1), z: +p.player.pos.z.toFixed(1) });`));
   const reset = (await ctx.snapshot()).arena;
-  ctx.check('arena: resetGame snaps back to the wave-1 floor',
+  ctx.check('arena: resetGame snaps back to the whole wave-1 floor',
             reset.sig === WAVE1 && reset.wave === 1,
             `${reset.name}/${reset.count} for wave ${reset.wave}`);
+  ctx.check('arena: resetGame parks the player before it lays the floor',
+            spawn.x === 0 && spawn.z === 30, `player ended at ${spawn.x},${spawn.z}`);
 
   // Frames for the half no check can make: does each archetype read as its description?
   for (const n of [1, 5, 6, 11, 16, 22]) { await at(ctx, n); await shot(ctx, `wave${n}`); }
