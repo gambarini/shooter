@@ -83,7 +83,10 @@ export default async function arena(ctx) {
   const w = {};
   // 22, not 21: every 7th wave rolls a mutator, and a mutator owns the floor, so wave 21
   // is not a sample of what the layout function does on its own.
-  for (const n of [1, 2, 3, 5, 6, 8, 10, 11, 16, 22]) w[n] = await at(ctx, n);
+  // 26, 27 and 29 are the plain waves of the block item 84 took back from OPEN: 25 and 30
+  // are bosses and 28 always rolls a mutator, so those three are the whole of what the
+  // rotation itself decides there.
+  for (const n of [1, 2, 3, 5, 6, 8, 10, 11, 16, 22, 26, 27, 29]) w[n] = await at(ctx, n);
   ctx.log(`floors: ${Object.entries(w).map(([n, a]) => `w${n}=${a.name}/${a.count}`).join(' ')}`);
 
   // Wave 1 is the floor the game shipped with — unrotated, unprofiled, nine boxes. Same
@@ -113,10 +116,25 @@ export default async function arena(ctx) {
   // Cover holds within ~15% of the original 338 u² everywhere except the boss floor,
   // which is the one sanctioned exception. Measured off the live records, so a mistyped
   // archetype fails here instead of shipping an unplayably sparse or dense arena.
-  const budget = [2, 3, 6, 8, 11, 16, 22].map(n => [n, Math.round(area(w[n]))]);
+  const budget = [2, 3, 6, 8, 11, 16, 22, 26, 27, 29].map(n => [n, Math.round(area(w[n]))]);
   ctx.check('arena: cover budget holds within 15% of 338 u²',
             budget.every(([, v]) => Math.abs(v / 338 - 1) <= 0.15),
             budget.map(([n, v]) => `w${n}=${v}`).join(' '));
+
+  // Item 84 — the boss floor is reached by being a boss wave (or by FRENZY), never by the
+  // rotation arriving at it. This is the rule that decides how long the cycle is, so it is
+  // asserted twice over: by name against whatever floor wave 5 turns out to be, and by the
+  // budget sample above, which now covers a full period and measures the cover a wave
+  // actually has — a future edit that reintroduced a different sparse archetype into the
+  // rotation would slip past the name check and not past that one.
+  ctx.check('arena: the rotation never hands a plain wave the boss floor',
+            [26, 27, 29].every(n => w[n].name !== w[5].name),
+            `w26=${w[26].name} w27=${w[27].name} w29=${w[29].name}, boss floor=${w[5].name}`);
+  // ...so the cycle is five archetypes long and wave 26 is back at the first one — in a
+  // different orientation, because SYM has its own period of 8.
+  ctx.check('arena: the rotation is five archetypes long and wraps re-oriented',
+            w[26].name === w[1].name && w[26].sig !== w[1].sig,
+            `w26=${w[26].name} vs w1=${w[1].name}, same sig ${w[26].sig === w[1].sig}`);
 
   // ---- 2. boss waves own an open floor --------------------------------------
   ctx.check('arena: boss waves fight on an open floor',
@@ -248,7 +266,9 @@ export default async function arena(ctx) {
             spawn.x === 0 && spawn.z === 30, `player ended at ${spawn.x},${spawn.z}`);
 
   // Frames for the half no check can make: does each archetype read as its description?
-  for (const n of [1, 5, 6, 11, 16, 22]) { await at(ctx, n); await shot(ctx, `wave${n}`); }
+  // 26 is in the list for item 84: it is the wave the rotation used to strip bare, and a
+  // frame of it is the only proof that what it fights on now is a floor with cover on it.
+  for (const n of [1, 5, 6, 11, 16, 22, 26]) { await at(ctx, n); await shot(ctx, `wave${n}`); }
 
   // ...and one of the reconfiguration itself, caught half-risen. Whether the floor
   // coming up reads as the arena rebuilding or as a rendering glitch is the single most

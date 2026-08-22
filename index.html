@@ -1060,7 +1060,7 @@ for (let i = 0; i < LAYOUT_MAX; i++) {
 }
 
 // --- the layout function -----------------------------------------------------
-//   layout(n) = SYM[(n - 1) % 8] applied to ARCHETYPE[floor((n - 1) / 5) % 6]
+//   layout(n) = SYM[(n - 1) % 8] applied to ROTATION[floor((n - 1) / 5) % 5]
 // Pure in n, exactly like sectorOf(n) and odDepth(n) above: no flag to set, drift or
 // leak, nothing for resetGame to undo, and `make playtest` stays reproducible per seed.
 // Re-orienting one box list every wave changes how the floor plays while holding the
@@ -1100,9 +1100,25 @@ const ARCHETYPES = [
     [-15, 10, 10, 7, 3], [15, 10, 10, 7, 3], [0, 38, 10, 7, 3],
     [-38, -8, 3, 7, 10], [38, -8, 3, 7, 10], [-18, -38, 3, 7, 10],
     [18, -38, 3, 7, 10], [-30, 28, 3, 7, 10], [30, 28, 3, 7, 10]] },
-  { name: 'OPEN',      /* 200 u² — the exception */ prof: 1, boxes: [
+  { name: 'OPEN',      /* 200 u² — the exception */ prof: 1, bossOnly: true, boxes: [
     [0, -46, 10, 4, 5], [0, 46, 10, 4, 5], [-46, 0, 5, 4, 10], [46, 0, 5, 4, 10]] },
 ];
+
+// Item 84 — the decision, written down where the array is: OPEN is the boss floor and
+// nothing else. It used to sit in the rotation as archetype 5, which handed it the whole
+// 26-30 block — waves 25, 26, 27, 29 and 30 all fought on 200 u², and 28 as well whenever
+// FRENZY rolled. That is not a variety beat, it is the arena switching itself off. OPEN's
+// four boxes map onto each other under all eight symmetries, so SYM only reshuffles which
+// slot holds which box and nothing the player can see changes; and its `prof` pins the
+// height cycle on top of that. Item 82's two promises — re-oriented every wave, height
+// travelling low -> tall — both died for six waves at the exact point a run is supposed to
+// peak. So the rotation runs over the archetypes NOT marked `bossOnly`, and the difficulty
+// question the open stretch accidentally answered goes back to item 68, which has levers
+// built for it. Two consequences, both deliberate: the cycle is 25 waves long rather than
+// 30, and a FRENZY the wave before a boss (14, 49, 84...) can still put OPEN back to back
+// with itself — one wave in four, and both of those waves announce themselves.
+const ROTATION = ARCHETYPES.map((a, i) => a.bossOnly ? -1 : i).filter(i => i >= 0);
+const OPEN_I = ARCHETYPES.findIndex(a => a.bossOnly);
 
 // The realized layout: fixed slot objects written in place, never reallocated.
 const layoutSlots = Array.from({ length: LAYOUT_MAX }, () => ({ x: 0, z: 0, w: 0, h: 0, d: 0 }));
@@ -1112,12 +1128,12 @@ let reconT = -1, reconWave = 0, reconPhase = 0, reconMut = null;   // reconT < 0
 const smooth = k => k * k * (3 - 2 * k);
 
 function buildLayout(n, mut) {
-  let ai = Math.floor((n - 1) / 5) % ARCHETYPES.length;
+  let ai = ROTATION[Math.floor((n - 1) / 5) % ROTATION.length];
   let pi = (n - 1) % HPROF.length;
   // Boss and mutator waves own the floor outright, the way computeMood already lets a
   // mutator own the lights and fog. It reverts for free: the next wave's layout is a
   // fresh function of n, so clearMutator has nothing to undo.
-  if (n % 5 === 0) ai = 5;                                   // boss → OPEN
+  if (n % 5 === 0) ai = OPEN_I;                               // boss → OPEN
   else if (mut && mut.layout !== undefined) {
     ai = mut.layout;
     if (mut.layoutProf !== undefined) pi = mut.layoutProf;
