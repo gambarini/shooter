@@ -3,7 +3,7 @@
 //
 //   node tools/playtest/run.mjs [options]        # or: make playtest
 //
-//   --scenario soak,perf   which scenarios to run, in order (default: soak,chaos,perf,boss,medals,layout)
+//   --scenario soak,perf   which scenarios to run, in order (default: soak,chaos,perf,boss,medals,arena,layout)
 //   --waves N              waves to clear in run 1 before dying (default 4)
 //   --perf-wave N          wave to reach before the FPS sample (default 6)
 //   --turbo N              sim sub-steps per frame while playing, 1..8 (default 6)
@@ -40,17 +40,18 @@ import medals from './scenarios/medals.mjs';
 import layout from './scenarios/layout.mjs';
 import chaos from './scenarios/chaos.mjs';
 import ab from './scenarios/ab.mjs';
+import arena from './scenarios/arena.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
 const OUT = join(ROOT, '.playtest');
 // `ab` is deliberately absent from the DEFAULT list below, not from this map: its default
 // baseline is HEAD, so every legitimate visual item would turn the default run red.
-const SCENARIOS = { soak, chaos, perf, boss, medals, layout, ab };
+const SCENARIOS = { soak, chaos, perf, boss, medals, arena, layout, ab };
 
 // ---------------------------------------------------------------- args
 function parseArgs(argv) {
-  const cfg = { scenario: 'soak,chaos,perf,boss,medals,layout', waves: 4, perfWave: 6, turbo: 6, seed: 1,
+  const cfg = { scenario: 'soak,chaos,perf,boss,medals,arena,layout', waves: 4, perfWave: 6, turbo: 6, seed: 1,
                 url: null, headless: false, keepOpen: false, saveBaseline: false, savePoses: false,
                 keepProfile: false, pointLightCap: 8, baseline: 'HEAD', noSandbox: false,
                 window: '1280,860' };

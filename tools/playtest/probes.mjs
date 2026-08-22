@@ -31,6 +31,18 @@ export const SNAPSHOT = `
     // because --url can point at a build older than the getter.
     // (No backticks in this string: SNAPSHOT is itself a template literal.)
     anim: { bossIntroT: +(p.bossIntroT || 0).toFixed(2), fov: +p.camera.fov.toFixed(2) },
+    // Item 82 — the arena is rebuilt between waves from a pure function of the wave
+    // number. One compact signature of the LIVE obstacle list covers the whole promise
+    // (no backticks in this string: SNAPSHOT is itself a template literal):
+    // it is identical at t = 0 of every run (so the reset diff above polices it for
+    // free), it is reproducible per seed, and it is what the arena scenario compares
+    // across waves. The || guards keep --url pointed at an older build from throwing.
+    arena: {
+      name: (p.arena || {}).name || '', wave: (p.arena || {}).wave || 0,
+      count: (p.obstacles || []).length,
+      sig: (p.obstacles || []).map(o => [o.mesh.position.x, o.mesh.position.z, o.hw, o.hd, o.h]
+             .map(v => Math.round(v * 10) / 10).join(',')).join('|'),
+    },
     weapons: p.weapons.map(w => ({ name: w.name, mag: w.mag, magSize: w.magSize,
                                    reserve: w.reserve === Infinity ? 'inf' : w.reserve })),
     // Item 56 was a damage-flash that survived a reset, so the "should be idle" DOM

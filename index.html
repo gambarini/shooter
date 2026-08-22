@@ -1025,6 +1025,17 @@ makeWall(ARENA * 2, wallH, 2, 0, wallH / 2,  ARENA);
 makeWall(2, wallH, ARENA * 2, -ARENA, wallH / 2, 0);
 makeWall(2, wallH, ARENA * 2,  ARENA, wallH / 2, 0);
 
+// ===========================================================================
+// Pillars — a fixed pool, a layout that is a pure function of the wave (item 82)
+// ===========================================================================
+// Nothing here is ever built or disposed at runtime. Twelve slots are minted once
+// against ONE shared unit box; a "layout" is `mesh.scale` + `mesh.position` on the
+// slots in use, and `obstacles` is rebuilt from those slots. That is the project's
+// pooling convention, and it also removes two bugs a build/dispose arena would own:
+// `pillarCaps` is indexed across frames by `glitchCap` (see updateEnv), so a
+// rebuilt array would leave a stale index; and a cap constructed at runtime would
+// come up with its literal pink in a lime sector, because applyMood only pushes
+// CAP_R/G/B while a mood is lerping. A pool constructs neither.
 const obstacles = [];
 const pillarMat = new THREE.MeshStandardMaterial({ color: 0x111a30, emissive: 0xff2e88, emissiveIntensity: 0.18,
                                                    metalness: 0.5, roughness: 0.5 });
@@ -1033,19 +1044,217 @@ const pillarMat = new THREE.MeshStandardMaterial({ color: 0x111a30, emissive: 0x
 // materials are cheap. Collected here for the per-frame writes.
 const pillarCaps = [];
 let CAP_R = 1, CAP_G = 0.180, CAP_B = 0.533;   // live cap channels — see TRIM_R above
-function addPillar(x, z, w, h, d) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), pillarMat);
-  m.position.set(x, h / 2, z); m.castShadow = true; m.receiveShadow = true; scene.add(m);
-  const cap = new THREE.Mesh(new THREE.BoxGeometry(w + .3, .3, d + .3),
-              new THREE.MeshBasicMaterial({ color: 0xff2e88 }));
-  cap.position.set(x, h, z); scene.add(cap);
+
+const PILLAR_GEO = new THREE.BoxGeometry(1, 1, 1);   // shared by every pillar AND every cap
+const LAYOUT_MAX = 12;                               // WARREN is the widest layout, at 12
+const pillars = [];
+for (let i = 0; i < LAYOUT_MAX; i++) {
+  const m = new THREE.Mesh(PILLAR_GEO, pillarMat);
+  m.castShadow = true; m.receiveShadow = true; m.visible = false; scene.add(m);
+  const cap = new THREE.Mesh(PILLAR_GEO, new THREE.MeshBasicMaterial({ color: 0xff2e88 }));
+  cap.visible = false; scene.add(cap);
   pillarCaps.push(cap.material);
-  obstacles.push({ mesh: m, hw: w / 2, hd: d / 2, h });
+  // `rec` is this slot's obstacles record, reused forever — obstacles holds references
+  // to these, so nothing downstream ever sees a rebuilt object.
+  pillars.push({ mesh: m, cap, rippled: true, rec: { mesh: m, hw: 0, hd: 0, h: 0 } });
 }
-[
-  [-22, -18, 5, 10, 5], [24, -22, 6, 14, 6], [18, 20, 5, 9, 5], [-26, 24, 6, 12, 6],
-  [0, 0, 8, 6, 8], [-40, -2, 4, 16, 4], [40, 8, 4, 18, 4], [6, -38, 5, 8, 12], [-10, 40, 12, 7, 5],
-].forEach(p => addPillar(...p));
+
+// --- the layout function -----------------------------------------------------
+//   layout(n) = SYM[(n - 1) % 8] applied to ARCHETYPE[floor((n - 1) / 5) % 6]
+// Pure in n, exactly like sectorOf(n) and odDepth(n) above: no flag to set, drift or
+// leak, nothing for resetGame to undo, and `make playtest` stays reproducible per seed.
+// Re-orienting one box list every wave changes how the floor plays while holding the
+// total footprint provably constant — a random arena could not promise either.
+
+// The eight symmetries of a square as [a, b, c, d], with x' = ax + bz, z' = cx + dz.
+// b !== 0 means the axes swapped, so each box's w and d swap with them.
+const SYM = [[1, 0, 0, 1], [0, -1, 1, 0], [-1, 0, 0, -1], [0, 1, -1, 0],
+             [-1, 0, 0, 1], [1, 0, 0, -1], [0, 1, 1, 0], [0, -1, -1, 0]];
+
+// Per-wave height profile, cycling low → mixed → tall. Tactical, not cosmetic: WASPs
+// fly over anything they clear (collideWasp), and shooter line-of-sight through
+// segBlocked inverts between a 4-unit floor and a 16-unit one.
+const HPROF = [h => h,                  // MIXED — the archetype's own heights
+               h => 3.5 + h * 0.08,     // LOW   — everything lands at ~4
+               h => 13 + h * 0.25];     // TALL  — everything lands at ~16
+
+// Six archetypes, each holding roughly today's ~338 u² of footprint. The totals are
+// written down so a later edit cannot silently drift the cover budget; OPEN is the
+// one sanctioned exception (it is the boss floor, and the point is nowhere to hide).
+// `breathe` marks the rotation-invariant ones, which SYM alone would never change.
+const ARCHETYPES = [
+  { name: 'SCATTER',   /* 338 u² */ boxes: [
+    [-22, -18, 5, 10, 5], [24, -22, 6, 14, 6], [18, 20, 5, 9, 5], [-26, 24, 6, 12, 6],
+    [0, 0, 8, 6, 8], [-40, -2, 4, 16, 4], [40, 8, 4, 18, 4], [6, -38, 5, 8, 12], [-10, 40, 12, 7, 5]] },
+  { name: 'COLONNADE', /* 360 u² */ boxes: [
+    [-40, -20, 6, 14, 6], [-20, -20, 6, 14, 6], [0, -20, 6, 14, 6], [20, -20, 6, 14, 6], [40, -20, 6, 14, 6],
+    [-40, 20, 6, 12, 6], [-20, 20, 6, 12, 6], [0, 20, 6, 12, 6], [20, 20, 6, 12, 6], [40, 20, 6, 12, 6]] },
+  { name: 'BASTION',   /* 320 u² */ breathe: true, boxes: [
+    [-7, -7, 8, 12, 8], [7, -7, 8, 12, 8], [-7, 7, 8, 12, 8], [7, 7, 8, 12, 8],
+    [-34, -34, 4, 8, 4], [34, -34, 4, 8, 4], [-34, 34, 4, 8, 4], [34, 34, 4, 8, 4]] },
+  { name: 'RING',      /* 338 u² */ breathe: true, boxes: [
+    [30, 0, 6.5, 11, 6.5], [21.2, 21.2, 6.5, 11, 6.5], [0, 30, 6.5, 11, 6.5], [-21.2, 21.2, 6.5, 11, 6.5],
+    [-30, 0, 6.5, 11, 6.5], [-21.2, -21.2, 6.5, 11, 6.5], [0, -30, 6.5, 11, 6.5], [21.2, -21.2, 6.5, 11, 6.5]] },
+  { name: 'WARREN',    /* 360 u² */ boxes: [
+    [-30, -30, 10, 7, 3], [0, -18, 10, 7, 3], [30, -30, 10, 7, 3],
+    [-15, 10, 10, 7, 3], [15, 10, 10, 7, 3], [0, 38, 10, 7, 3],
+    [-38, -8, 3, 7, 10], [38, -8, 3, 7, 10], [-18, -38, 3, 7, 10],
+    [18, -38, 3, 7, 10], [-30, 28, 3, 7, 10], [30, 28, 3, 7, 10]] },
+  { name: 'OPEN',      /* 200 u² — the exception */ prof: 1, boxes: [
+    [0, -46, 10, 4, 5], [0, 46, 10, 4, 5], [-46, 0, 5, 4, 10], [46, 0, 5, 4, 10]] },
+];
+
+// The realized layout: fixed slot objects written in place, never reallocated.
+const layoutSlots = Array.from({ length: LAYOUT_MAX }, () => ({ x: 0, z: 0, w: 0, h: 0, d: 0 }));
+const slotOn = new Uint8Array(LAYOUT_MAX);
+let layoutCount = 0, layoutWave = 0, layoutName = '';
+let reconT = -1, reconWave = 0, reconPhase = 0, reconMut = null;   // reconT < 0 = idle
+const smooth = k => k * k * (3 - 2 * k);
+
+function buildLayout(n, mut) {
+  let ai = Math.floor((n - 1) / 5) % ARCHETYPES.length;
+  let pi = (n - 1) % HPROF.length;
+  // Boss and mutator waves own the floor outright, the way computeMood already lets a
+  // mutator own the lights and fog. It reverts for free: the next wave's layout is a
+  // fresh function of n, so clearMutator has nothing to undo.
+  if (n % 5 === 0) ai = 5;                                   // boss → OPEN
+  else if (mut && mut.layout !== undefined) {
+    ai = mut.layout;
+    if (mut.layoutProf !== undefined) pi = mut.layoutProf;
+  }
+  const A = ARCHETYPES[ai];
+  if (A.prof !== undefined) pi = A.prof;
+  const prof = HPROF[pi];
+  const S = SYM[(n - 1) % 8];
+  const a = S[0], b = S[1], c = S[2], d = S[3];
+  // RING and BASTION are invariant under all eight symmetries, so they get a radius
+  // breath instead — still pure in n, still the same footprint.
+  const br = A.breathe ? 1 + 0.15 * Math.sin(n * 1.1) : 1;
+  layoutName = A.name;
+  layoutCount = A.boxes.length;
+  for (let i = 0; i < layoutCount; i++) {
+    const bx = A.boxes[i], s = layoutSlots[i];
+    s.x = (a * bx[0] + b * bx[1]) * br;
+    s.z = (c * bx[0] + d * bx[1]) * br;
+    s.w = b !== 0 ? bx[4] : bx[2];
+    s.d = b !== 0 ? bx[2] : bx[4];
+    s.h = prof(bx[3]);
+    slotOn[i] = 1;
+  }
+  for (let i = layoutCount; i < LAYOUT_MAX; i++) slotOn[i] = 0;
+}
+
+// One slot at rise fraction k (0 = below the floor, 1 = fully up). The cap rides the
+// pillar's top, so a rising box pushes its own neon lid up with it.
+function applySlot(i, k) {
+  const p = pillars[i];
+  if (i >= layoutCount || !slotOn[i] || k <= 0.001) { p.mesh.visible = p.cap.visible = false; return; }
+  const s = layoutSlots[i], h = s.h * k;
+  p.mesh.visible = p.cap.visible = true;
+  p.mesh.scale.set(s.w, h, s.d);
+  p.mesh.position.set(s.x, h / 2, s.z);
+  p.cap.scale.set(s.w + 0.3, 0.3, s.d + 0.3);
+  p.cap.position.set(s.x, h, s.z);
+}
+
+function rebuildObstacles() {
+  obstacles.length = 0;
+  for (let i = 0; i < layoutCount; i++) {
+    if (!slotOn[i]) continue;
+    const s = layoutSlots[i], r = pillars[i].rec;
+    r.hw = s.w / 2; r.hd = s.d / 2; r.h = s.h;
+    obstacles.push(r);
+  }
+}
+
+// Realize a wave's layout instantly, no animation. Used at boot, by resetGame, and as
+// startWave's safety net for a wave entered without a between-wave gap. `guard` skips a
+// box that would land on the player or a pickup — off at boot only, where `player` and
+// `pickups` are still in their temporal dead zone (and the arena is provably empty).
+function snapLayout(n, mut, guard) {
+  buildLayout(n, mut);
+  if (guard) for (let i = 0; i < layoutCount; i++) if (footprintBlocked(i)) slotOn[i] = 0;
+  for (let i = 0; i < LAYOUT_MAX; i++) { applySlot(i, 1); pillars[i].rippled = true; }
+  rebuildObstacles();
+  layoutWave = n;
+  reconT = -1;
+}
+
+// --- the reconfiguration moment ---------------------------------------------
+// The 2.5 s betweenWaves gap was dead time. The old floor sinks, the new one rises in
+// a stagger, and each box ripples the grid as it breaks through. Without this the
+// arena teleports, and the teleport is what reads as a bug. Total 2.03 s, so it is
+// always finished before startWave fires.
+const RECON_SINK = 0.6, RECON_HOLD = 0.2, RECON_RISE = 0.9, RECON_STAGGER = 0.03;
+
+function beginReconfigure(n, mut) {
+  reconT = 0; reconWave = n; reconPhase = 0; reconMut = mut;
+  for (let i = 0; i < LAYOUT_MAX; i++) pillars[i].rippled = false;
+  sfx.arenaSink();
+}
+
+// A pillar never rises through the player or a live pickup: pickups persist across
+// waves and spawnRandomPickup only avoids obstacles at spawn time, so the check has to
+// happen here. collideArena's push-out is the backstop, not the plan.
+function footprintBlocked(i) {
+  const s = layoutSlots[i], hw = s.w / 2, hd = s.d / 2;
+  if (Math.abs(player.pos.x - s.x) < hw + player.radius + 0.6 &&
+      Math.abs(player.pos.z - s.z) < hd + player.radius + 0.6) return true;
+  for (const p of pickups)                       // +2 matches spawnRandomPickup's slack
+    if (Math.abs(p.group.position.x - s.x) < hw + 2 &&
+        Math.abs(p.group.position.z - s.z) < hd + 2) return true;
+  return false;
+}
+
+function updateReconfigure(dt) {
+  if (reconT < 0) return;
+  reconT += dt;
+  // --- sink: the OLD layout goes down, and stays collidable and shootable the whole
+  // way. Clearing `obstacles` at the first frame would evaporate cover a beat early.
+  if (reconT < RECON_SINK) {
+    const k = 1 - smooth(reconT / RECON_SINK);
+    for (let i = 0; i < layoutCount; i++) { applySlot(i, k); pillars[i].rec.h = layoutSlots[i].h * k; }
+    return;
+  }
+  if (reconPhase === 0) {                        // floor closed: nothing to hide behind
+    for (let i = 0; i < LAYOUT_MAX; i++) applySlot(i, 0);
+    obstacles.length = 0;
+    buildLayout(reconWave, reconMut);
+    reconPhase = 1;
+  }
+  const rt = reconT - RECON_SINK - RECON_HOLD;
+  if (rt < 0) return;
+  if (reconPhase === 1) {
+    // `obstacles` is claimed at the START of the rise, not the end: a player who walks
+    // onto a footprint mid-rise would otherwise get a pillar through them, and the
+    // item's promise is that that can never happen. The cost is 0.9 s of being blocked
+    // by a knee-high box, which reads as "back off, this is coming up".
+    for (let i = 0; i < layoutCount; i++) if (footprintBlocked(i)) slotOn[i] = 0;
+    rebuildObstacles();
+    layoutWave = reconWave;
+    sfx.arenaRise();
+    reconPhase = 2;
+  }
+  let done = true;
+  for (let i = 0; i < layoutCount; i++) {
+    const k = Math.min(1, Math.max(0, (rt - i * RECON_STAGGER) / RECON_RISE));
+    if (k < 1) done = false;
+    const p = pillars[i];
+    if (!p.rippled && k > 0 && slotOn[i]) {      // the grid breaking under a new box
+      p.rippled = true;
+      emitRipple(layoutSlots[i].x, layoutSlots[i].z, 0.9);
+    }
+    const e = smooth(k);
+    applySlot(i, e);
+    // The record's height tracks the mesh, not the target: `h` is what collideWasp and
+    // the rocket / enemy-shot impact loops test against, and a box that is 20% up should
+    // be 20% tall to all three. `hw`/`hd` are final from the first frame on purpose —
+    // that is the footprint being claimed, and it is what keeps the player out.
+    p.rec.h = layoutSlots[i].h * e;
+  }
+  if (done) reconT = -1;
+}
+snapLayout(1, null);   // the title screen's arena is wave 1's, like every first run
 
 // ===========================================================================
 // Living environment (item 31) — the arena idles alive even when you stand still.
@@ -1127,7 +1336,9 @@ function updateEnv(dt) {
     } else {
       glitchTimer -= dt;
       if (glitchTimer <= 0) {                          // fire a new 3-frame data-glitch
-        glitchCap = Math.floor(Math.random() * pillarCaps.length);
+        // Item 82: only the caps a live pillar is wearing — the pool's spare slots are
+        // hidden, and a glitch on one of them would be an invisible no-op.
+        glitchCap = Math.floor(Math.random() * Math.max(1, layoutCount));
         glitchFrames = 3;
         pillarCaps[glitchCap].color.setRGB(1, 1, 1);
         glitchTimer = 4 + Math.random() * 5;
@@ -1297,6 +1508,13 @@ const sfx = {
                  noiseBurst(0.45, 0.3); },
   // Sector-change sweep (item 51): a slow rising pad under the banner. Deliberately
   // quieter and longer than the mutator sting — this is scenery, not a threat.
+  // Item 82 — the arena reconfiguring between waves: a downward sweep as the old floor
+  // sinks, an upward one as the new one comes through.
+  arenaSink: () => { beep({ freq: 620, slideTo: 90, type: 'triangle', dur: 0.55, vol: 0.1 });
+                     noiseBurst(0.5, 0.07); },
+  arenaRise: () => { beep({ freq: 110, slideTo: 640, type: 'triangle', dur: 0.8, vol: 0.11 });
+                     beep({ freq: 55, slideTo: 320, type: 'sine', dur: 0.8, vol: 0.09 });
+                     noiseBurst(0.7, 0.06); },
   sector: () => { beep({ freq: 180, slideTo: 720, type: 'triangle', dur: 0.7, vol: 0.11 });
                   beep({ freq: 90, slideTo: 360, type: 'sine', dur: 0.9, vol: 0.13, delay: 0.05 });
                   beep({ freq: 1080, slideTo: 1440, type: 'sine', dur: 0.35, vol: 0.05, delay: 0.45 }); },
@@ -2352,6 +2570,10 @@ function spawnRandomPickup(forceType) {
 // ===========================================================================
 const state = { running: false, paused: false, choosing: false, rerolled: false, score: 0, wave: 0, toSpawn: 0, spawnTimer: 0,
                 combo: 1, comboTimer: 0, betweenWaves: 0, pickupTimer: 8, shake: 0, time: 0, slowmo: 0, ult: 0, mutator: null,
+                // Item 82: the NEXT wave's mutator, rolled a gap early because the floor it
+                // owns has to rise before the wave starts. Lives on state so item 58's
+                // t = 0 reset diff reports it by name if resetGame ever forgets it.
+                nextMutator: null,
                 lastHitBy: null, upgrades: [], waveClean: false,
                 stats: { shots: 0, hits: 0, crits: 0, kills: 0, bestCombo: 1, style: 0, dmgDealt: 0, dmgTaken: 0, wkills: {} } };
 
@@ -2359,14 +2581,17 @@ const state = { running: false, paused: false, choosing: false, rerolled: false,
 // reverted the moment the wave clears (and on gameOver/resetGame — never leaks).
 // Boss waves (multiples of 5) win the collision: wave 35 etc. gets no mutator.
 const MUTATORS = [
+  // `layout` / `layoutProf` (item 82) index ARCHETYPES / HPROF: a mutator owns the floor
+  // it is fought on the same way it already owns the lights and fog, and gives it back
+  // for free — the next wave's layout is recomputed from n regardless.
   { name: 'SWARM',       color: '#ff8f3a', desc: 'ALL CHASERS · 2× SPAWNS · 1.5× SCORE',
-    countMul: 2,   hpMul: 0.6, scoreMul: 1.5, forceType: 'chaser' },
+    countMul: 2,   hpMul: 0.6, scoreMul: 1.5, forceType: 'chaser', layout: 4 },
   { name: 'BULLET HELL', color: '#b04bff', desc: 'SHOOTERS ONLY · RAPID FIRE · 1.5× SCORE',
-    scoreMul: 1.5, forceType: 'shooter', fireCDMul: 0.5 },
+    scoreMul: 1.5, forceType: 'shooter', fireCDMul: 0.5, layout: 1, layoutProf: 2 },
   { name: 'BERSERK',     color: '#ff2020', desc: 'FAST ENEMIES · 1.5× DAMAGE · 2× SCORE',
-    scoreMul: 2,   speedMul: 1.5, dmgMul: 1.5 },
+    scoreMul: 2,   speedMul: 1.5, dmgMul: 1.5, layout: 3 },
   { name: 'FRENZY',      color: '#00f0ff', desc: 'INFINITE AMMO · 1.5× SPAWNS',
-    countMul: 1.5, infiniteAmmo: true },
+    countMul: 1.5, infiniteAmmo: true, layout: 5 },
 ];
 function clearMutator() {
   if (!state.mutator) return;
@@ -2382,7 +2607,10 @@ function startWave(n) {
   state.spawnTimer = 0;
   document.querySelector('#wave b').textContent = n;
   if (n % 7 === 0 && n % 5 !== 0) {
-    const m = MUTATORS[Math.floor(Math.random() * MUTATORS.length)];
+    // Item 82 — normally rolled one gap early by nextWaveCheck (the layout needs it while
+    // the pillars are still down). The fallback covers a wave entered without a gap:
+    // resetGame's wave 1, or __probe.fn.startWave(7).
+    const m = state.nextMutator || MUTATORS[Math.floor(Math.random() * MUTATORS.length)];
     state.mutator = m;
     state.toSpawn = Math.floor(state.toSpawn * (m.countMul || 1));
     if (m.infiniteAmmo) {
@@ -2399,6 +2627,11 @@ function startWave(n) {
     // of it (#combo sits mid-screen), and the wave number is already in the HUD.
     if (n % 5 !== 0) flashCombo(`WAVE ${n}`, '#9fe9ff');
   }
+  state.nextMutator = null;
+  // Item 82 — the between-wave reconfigure has normally already raised this wave's floor.
+  // Anything that skips the gap (a fresh run, the harness calling startWave directly)
+  // snaps to it here, so the layout can never disagree with the wave number.
+  if (layoutWave !== n) snapLayout(n, state.mutator, true);
   // Item 51: crossing into a new sector. Pure function of n — no tracking variable, so
   // nothing extra to reset. The banner announces it; the palette itself rides setMood
   // below, which is why the arena re-themes on the same 1.6 s curve as every other
@@ -2432,6 +2665,14 @@ function nextWaveCheck() {
     if (state.waveClean && state.wave >= 5) awardMedal('untouchable');
     clearMutator();   // score bonus + effects end with the last kill of the wave
     showUpgrades();   // halts the countdown (update() skips while choosing)
+    // Item 82 — the next wave's floor has to rise during this gap, so the mutator that
+    // owns it is rolled HERE rather than in startWave. Deliberately after showUpgrades():
+    // drawUpgradeChoices() keeps its position in the seeded random stream, so a --seed
+    // still reproduces the same cards it always did.
+    const nx = state.wave + 1;
+    state.nextMutator = (nx % 7 === 0 && nx % 5 !== 0)
+      ? MUTATORS[Math.floor(Math.random() * MUTATORS.length)] : null;
+    beginReconfigure(nx, state.nextMutator);
   }
 }
 
@@ -3632,6 +3873,9 @@ function update(dt) {
   if (state.pickupTimer <= 0) { state.pickupTimer = 11 + Math.random() * 6; spawnRandomPickup(); }
 
   // ----- spawning -----
+  // Item 82 — not nested under the betweenWaves branch: the rise must be able to finish
+  // even if the gap somehow ends under it. Self-gates when idle.
+  updateReconfigure(dt);
   if (state.betweenWaves > 0) { state.betweenWaves -= dt; if (state.betweenWaves <= 0) startWave(state.wave + 1); }
   if (state.toSpawn > 0) {
     state.spawnTimer -= dt;
@@ -4369,6 +4613,9 @@ function resetGame() {
   state.score = 0; state.wave = 0; state.combo = 1; state.comboTimer = 0;
   state.toSpawn = 0; state.betweenWaves = 0; state.pickupTimer = 8; state.shake = 0;
   state.time = 0; state.slowmo = 0; state.choosing = false; state.rerolled = false; state.mutator = null;
+  // Item 82: drop a reconfigure caught mid-sink and put the wave-1 floor back, whole. The
+  // player is already parked at (0, EYE, 30) above, so no footprint can be standing on it.
+  state.nextMutator = null; snapLayout(1, null);
   setMood(1, true);   // item 28: snap arena mood back to the wave-1 baseline on restart
   resetEnv();         // item 31: settle trims/caps/dust glitch state to idle
   gridUniforms.uTime.value = 0; gridUniforms.uRipples.value.forEach(r => r.set(0, 0, -1e3, 0)); rippleIdx = 0;
@@ -4527,6 +4774,14 @@ window.__probe = {
   set fixedDt(v) { probe.fixedDt = v === null ? null : Math.max(0, Math.min(0.05, +v || 0)); },
   // --- live game objects ---
   state, player, scene, renderer, camera, settings, weapons, enemies,
+  // Item 82 — the live pillar list. `obstacles` is rebuilt (in place) every wave, so the
+  // harness reads the array itself rather than caching records; `arena` is the layout's
+  // name and the wave it was built for, which is what makes "pure function of n" checkable.
+  obstacles,
+  get arena() { return { name: layoutName, wave: layoutWave, count: obstacles.length }; },
+  // The mutator table, so a harness can force a specific one through `state.nextMutator`
+  // instead of re-rolling wave 7 until the seed hands it the one under test.
+  MUTATORS,
   get mods()          { return mods; },
   // Item 41 — the persistent medal blob. Deliberately NOT part of probes.mjs's SNAPSHOT:
   // its counters climb during a run by design, so a leak diff would read them as a leak.
@@ -4549,6 +4804,10 @@ window.__probe = {
         // board landing under it?" case would go unchecked. This lets the layout
         // scenario draw a synthetic board with no network.
         renderGlobalBoard,
+        // Item 82 — place a pickup on an exact spot. spawnRandomPickup already dodges the
+        // obstacles, so it can never set up the case the arena scenario has to prove:
+        // a pickup sitting where the NEXT wave's floor wants to raise a pillar.
+        spawnPickup,
         // Item 65 — the arena idles alive: `updateEnv` breathes the wall trims by +/-38% on
         // a ~7 s cycle off an `envTime` that accumulates from page load and is never reset
         // mid-run. Two builds photographed from the same camera therefore differ by

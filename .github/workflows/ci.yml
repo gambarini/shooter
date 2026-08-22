@@ -66,12 +66,17 @@ jobs:
           echo "using $BIN — $("$BIN" --version)"
 
       - name: Headless playtest — leaks, state and hostile restarts
-        # soak (item 58) and chaos (item 64) are the two scenarios that assert only
-        # logic: the t=0 reset diff, pool conservation, GPU accounting and the point-
-        # light budget. None of them touches an FPS number, which is what makes them
+        # soak (item 58), chaos (item 64) and arena (item 82) are the scenarios that
+        # assert only logic: the t=0 reset diff, pool conservation, GPU accounting, the
+        # point-light budget, and the arena layout being a pure function of the wave
+        # number. None of them touches an FPS number, which is what makes them
         # meaningful under SwiftShader's CPU renderer, where FPS is not. perf, boss,
         # medals and layout stay out — they judge frame times, screenshots and
         # viewport emulation, and are a human's job or a local one.
+        #
+        # arena is the cheapest of the three by an order of magnitude (~6 s headless at
+        # this window size): it drives startWave directly and reads a signature, so it
+        # never plays a wave.
         #
         # --no-sandbox because Ubuntu 24.04 restricts the unprivileged user namespaces
         # Chrome's sandbox needs; it is opt-in precisely so local runs keep theirs.
@@ -92,7 +97,7 @@ jobs:
         # from it, so a CDN outage reads here as "the engine never booted". If that
         # starts happening, fix it at the source — a gate that fails randomly gets
         # disabled, and then nothing is gated.
-        run: node tools/playtest/run.mjs --headless --no-sandbox --window 800,600 --waves 3 --scenario soak,chaos
+        run: node tools/playtest/run.mjs --headless --no-sandbox --window 800,600 --waves 3 --scenario soak,chaos,arena
 
       - name: Upload the playtest report on failure
         if: failure()

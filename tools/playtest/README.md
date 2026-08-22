@@ -5,8 +5,8 @@
 Starts its own static server and its own dedicated Chrome, plays several waves, dies,
 restarts, plays another, dies, restarts again — and asserts the things a human watching
 the screen cannot see. Then five more scenarios do the same for hostile restarts, the boss
-waves, medals and short viewports. ~90 seconds on an M-series laptop, exits non-zero on
-failure, writes `.playtest/report.json`.
+waves, medals, the between-wave arena rebuild and short viewports. ~100 seconds on an
+M-series laptop, exits non-zero on failure, writes `.playtest/report.json`.
 
 It does **not** replace the playtest. Feel, audio, bloom intensity, readability and
 anything aesthetic still need a human, and the Session Log should still say what
@@ -46,6 +46,8 @@ Before believing any FPS number:
 | **hostile restarts** | a restart, death or pause taken mid-explosion, mid-boss-intro, mid-upgrade-screen, mid-reload, mid-dash, mid-mutator or inside the boss-kill slow-mo — plus a monkey pass of random input |
 | **medal award / persistence** | a medal that re-toasts, does not persist, or a recap grid that mislabels earned vs unearned |
 | **alternating boss waves** | wave 10's ARTILLERY telegraphing, escalating, spawning its own amber minis and taking its live barrage with it when it dies — wave 5's melee fight still being the melee fight — and either boss naming itself in the recap with the name its title card drew |
+| **the arena layout is a pure function of the wave** | a `Math.random()` in the layout — which no screenshot can see, and which would break `--seed`, the `ab` baseline and item 43's seeded daily |
+| **the between-wave reconfigure** | a pillar raised through the player or a live pickup, a mutator floor that outlives its wave, a restart that does not snap back to the wave-1 floor |
 | **card reachability at 1280x700, 844x390 and 1280x950** | a CTA — or the death card's first-timer NAME row — that grew below the fold of its own scroll box, or under the sticky footer; items 47/56/57 all hit this and none of them could fail a run on it |
 | **sticky footer paint, in both states** | a footer band that lets the content behind it stay legible while the card scrolls — or that paints at all on a window where nothing overflows (item 67's property) |
 | **fresh-page precondition, per scenario** | a scenario that starts from the last one's leftovers instead of its own setup (item 73) |
@@ -121,7 +123,7 @@ re-record it with `--save-baseline` rather than loosening the 0.8 tolerance.
     make playtest ARGS="--keep-open"          leave Chrome up to poke at a failure
     make playtest ARGS="--seed 7"             a different, still reproducible run
     make playtest ARGS="--waves 6 --turbo 8"  a longer soak
-    make playtest ARGS="--scenario perf"      one scenario (default: soak,chaos,perf,boss,medals,layout)
+    make playtest ARGS="--scenario perf"      one scenario (default: soak,chaos,perf,boss,medals,arena,layout)
     make playtest ARGS="--scenario ab --baseline v0.21.5"   diff the frame against a git ref
     make playtest ARGS="--scenario ab --save-poses"        write the six poses even on a pass
     make playtest ARGS="--save-baseline"      record this machine's perf numbers
@@ -154,6 +156,7 @@ would also wipe the medals, best score and name saved in the profile you kept.
     scenarios/perf.mjs the frame-time sample under shotgun spam
     scenarios/boss.mjs the wave 5 / wave 10 boss fights (item 45)
     scenarios/medals.mjs medal awards, the toast queue and the recap grid (item 41)
+    scenarios/arena.mjs  the arena reconfiguring between waves (item 82)
     scenarios/layout.mjs card reachability on short/touch viewports (item 67)
 
 To add a check, add a field to `SNAPSHOT` in `probes.mjs` and assert on it — that is the
@@ -235,6 +238,31 @@ novas and a full spawn cycle, so it mints the geometry those paths own (15 geome
 3 textures, measured) and a comparison across it reads warm-up as a leak. Pass 2 does the
 identical work on warm pools and adds nothing, which is what makes the GPU check across it
 tight enough to mean something.
+
+`arena` (item 82) is the shape for a scenario whose subject is a **pure function**, and it
+is the cheapest kind of check in the rig — ~6 seconds, because it never plays a wave. The
+floor is rebuilt between waves from `layout(n)`, and "it is a function of n and nothing
+else" is precisely the promise a human cannot verify: a random arena and a deterministic
+one look identical on screen, and only the random one breaks `--seed`, the `ab` baseline
+diff and item 43's seeded daily challenge. Four things it must keep doing:
+
+- **Assert on the signature, not on archetype names.** `SNAPSHOT.arena` is a compact
+  string built from the LIVE `obstacles` records, so a retuned height profile, a seventh
+  archetype or a reordered symmetry table changes the numbers and no check needs an edit.
+  The two deliberate literals are the wave-1 floor — which must never drift, it is the
+  arena the game shipped with — and the mutator pairings, which *are* the spec.
+- **Reach waves with `startWave(N)` and force mutators through `state.nextMutator`.**
+  Never play until the seed produces the wave you want. `__probe.MUTATORS` exists so the
+  four pairings can each be tested rather than whichever one wave 7 happened to roll.
+- **Walk the player to `(0, 64)` before reading a floor.** A wave entered without a
+  between-wave gap still refuses to raise a box on top of whoever is standing there, so a
+  player left on the `(0, 30)` spawn clips a box off RING and OPEN and every signature is
+  of a floor with a hole in it.
+- **Prove the gap delivered the wave, not just that it spared the player.** A
+  reconfigure that raised nothing at all would pass "no pillar rose through the player"
+  perfectly. The count and archetype are checked alongside it, and so is the fact that
+  the player never moved — a sinking floor that shoves them off the footprint first would
+  make the whole leg vacuous.
 
 `ab` (item 65) is the shape for a scenario that compares the game against **itself at
 another commit**. It serves `git show <ref>:index.html` from a second port, walks six fixed
