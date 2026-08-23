@@ -1100,23 +1100,37 @@ const ARCHETYPES = [
     [-15, 10, 10, 7, 3], [15, 10, 10, 7, 3], [0, 38, 10, 7, 3],
     [-38, -8, 3, 7, 10], [38, -8, 3, 7, 10], [-18, -38, 3, 7, 10],
     [18, -38, 3, 7, 10], [-30, 28, 3, 7, 10], [30, 28, 3, 7, 10]] },
+  // Item 87 — the four slabs hug the four walls, and each is slid ALONG its own wall by a
+  // different distance: -24, -12, +12, +24 going round south, east, north, west. That is
+  // the whole change, and it is the difference between one arena and eight. Centred, the
+  // set mapped onto itself under all eight symmetries, so SYM permuted which slot held
+  // which box and the picture never moved — every boss wave and every FRENZY was fought on
+  // a pixel-identical floor. Four distinct offsets leave no rotation and no reflection that
+  // maps the set onto itself, so all eight orientations are distinct floors and the boss
+  // cycle is 40 waves long. Footprint is untouched (a slab that slides is the same slab):
+  // still 200 u², still the sanctioned exception, still nowhere to hide in the middle.
   { name: 'OPEN',      /* 200 u² — the exception */ prof: 1, bossOnly: true, boxes: [
-    [0, -46, 10, 4, 5], [0, 46, 10, 4, 5], [-46, 0, 5, 4, 10], [46, 0, 5, 4, 10]] },
+    [-24, -46, 10, 4, 5], [46, -12, 5, 4, 10], [12, 46, 10, 4, 5], [-46, 24, 5, 4, 10]] },
 ];
 
 // Item 84 — the decision, written down where the array is: OPEN is the boss floor and
 // nothing else. It used to sit in the rotation as archetype 5, which handed it the whole
 // 26-30 block — waves 25, 26, 27, 29 and 30 all fought on 200 u², and 28 as well whenever
 // FRENZY rolled. That is not a variety beat, it is the arena switching itself off. OPEN's
-// four boxes map onto each other under all eight symmetries, so SYM only reshuffles which
-// slot holds which box and nothing the player can see changes; and its `prof` pins the
-// height cycle on top of that. Item 82's two promises — re-oriented every wave, height
+// four boxes mapped onto each other under all eight symmetries, so SYM only reshuffled
+// which slot held which box and nothing the player could see changed; and its `prof` pins
+// the height cycle on top of that. Item 82's two promises — re-oriented every wave, height
 // travelling low -> tall — both died for six waves at the exact point a run is supposed to
-// peak. So the rotation runs over the archetypes NOT marked `bossOnly`, and the difficulty
+// peak. (Item 87 has since broken that invariance — see the OPEN row above — so only the
+// `prof` half of this still holds. The decision does not rest on it: 200 u² for a sixth of
+// the run is the argument, and that is unchanged.)
+// So the rotation runs over the archetypes NOT marked `bossOnly`, and the difficulty
 // question the open stretch accidentally answered goes back to item 68, which has levers
 // built for it. Two consequences, both deliberate: the cycle is 25 waves long rather than
 // 30, and a FRENZY the wave before a boss (14, 49, 84...) can still put OPEN back to back
-// with itself — one wave in four, and both of those waves announce themselves.
+// with itself — one wave in four, and both of those waves announce themselves. Since item
+// 87 those two are at least different OPENs: consecutive waves are always consecutive
+// symmetries, so 14 and 15 are the same slabs stood on a different axis.
 const ROTATION = ARCHETYPES.map((a, i) => a.bossOnly ? -1 : i).filter(i => i >= 0);
 const OPEN_I = ARCHETYPES.findIndex(a => a.bossOnly);
 

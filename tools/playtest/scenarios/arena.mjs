@@ -75,6 +75,13 @@ async function shot(ctx, name, posed) {
 }
 
 const slots = a => a.sig.split('|');            // one 'x,z,hw,hd,h' record per live box
+// The same records SORTED — the floor as a PICTURE rather than as a slot order. `sig` is
+// joined in obstacle order and SYM permutes which slot holds which box, so two waves can
+// have different signatures and an identical floor: on the build item 87 fixed, OPEN gave
+// eight different signatures across ten boss waves while being one picture. Any check that
+// wants to say "the floor MOVED" has to compare these; a check that wants "the floor is
+// unchanged" is stricter with the raw sig and should keep using it. See item 94.
+const pic = a => slots(a).sort().join('|');
 const heights = a => a.sig.split('|').map(b => +b.split(',')[4]);
 const area = a => a.sig.split('|').reduce((t, b) => {
   const f = b.split(',').map(Number); return t + f[2] * 2 * f[3] * 2; }, 0);
@@ -87,7 +94,7 @@ export default async function arena(ctx) {
   // 26, 27 and 29 are the plain waves of the block item 84 took back from OPEN: 25 and 30
   // are bosses and 28 always rolls a mutator, so those three are the whole of what the
   // rotation itself decides there.
-  for (const n of [1, 2, 3, 5, 6, 8, 10, 11, 16, 22, 26, 27, 29]) w[n] = await at(ctx, n);
+  for (const n of [1, 2, 3, 5, 6, 8, 10, 11, 15, 16, 20, 22, 25, 26, 27, 29]) w[n] = await at(ctx, n);
   ctx.log(`floors: ${Object.entries(w).map(([n, a]) => `w${n}=${a.name}/${a.count}`).join(' ')}`);
 
   // Wave 1 is the floor the game shipped with — unrotated, unprofiled, nine boxes. Same
@@ -141,6 +148,17 @@ export default async function arena(ctx) {
   ctx.check('arena: boss waves fight on an open floor',
             w[5].name === w[10].name && area(w[5]) < 338 * 0.7 && Math.max(...heights(w[5])) < 6,
             `w5=${w[5].name}/${Math.round(area(w[5]))}u² h<=${Math.max(...heights(w[5]))} w10=${w[10].name}`);
+
+  // Item 87 — ...and it is a DIFFERENT open floor each time. OPEN's four slabs used to sit
+  // dead centre on their walls, which made the set invariant under all eight symmetries:
+  // SYM only permuted which slot held which box, so every boss wave from 5 to 100 and every
+  // FRENZY was fought on one pixel-identical arena. Sliding each slab along its own wall by
+  // a different distance is what hands OPEN back to SYM, and this is the check that says so.
+  // Compared as pictures: against the raw signature this check passes on the broken build.
+  const BOSSES = [5, 10, 15, 20, 25];
+  ctx.check('arena: no two boss floors are the same picture',
+            new Set(BOSSES.map(n => pic(w[n]))).size === BOSSES.length,
+            BOSSES.map(n => `w${n}=${pic(w[n])}`).join('  '));
 
   // ---- 3. mutators own their floor, and give it back ------------------------
   const PAIRED = { SWARM: 'WARREN', 'BULLET HELL': 'COLONNADE', BERSERK: 'RING', FRENZY: 'OPEN' };
@@ -305,7 +323,18 @@ export default async function arena(ctx) {
   // Frames for the half no check can make: does each archetype read as its description?
   // 26 is in the list for item 84: it is the wave the rotation used to strip bare, and a
   // frame of it is the only proof that what it fights on now is a floor with cover on it.
-  for (const n of [1, 5, 6, 11, 16, 22, 26]) { await at(ctx, n); await shot(ctx, `wave${n}`); }
+  // 5 AND 25 are both in it for item 87, and they are the only pair here that exists to be
+  // compared with each other: the check above proves those two floors differ, but whether
+  // the difference is legible from the deck — or reads as the same room with the furniture
+  // nudged — is exactly the half a check cannot settle.
+  // A boss wave takes the camera for BOSS_INTRO_T while it punches the FOV, so waves 5 and
+  // 25 have to be let go of before the shutter — photographed during it, both frames are of
+  // the intro card and neither is of a floor.
+  for (const n of [1, 5, 6, 11, 16, 22, 25, 26]) {
+    await at(ctx, n);
+    await ctx.waitFor('window.__probe.bossIntroT <= 0', { timeout: 20_000, label: `wave ${n} intro` });
+    await shot(ctx, `wave${n}`);
+  }
 
   // ...and one of the reconfiguration itself, caught half-risen. Whether the floor
   // coming up reads as the arena rebuilding or as a rendering glitch is the single most
