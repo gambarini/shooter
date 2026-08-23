@@ -164,7 +164,9 @@ fan-outs. `.claude/skills/roadmap-item/SKILL.md` owns the modes and what each on
   `update(dt)`.
 - **Disposal**: anything removed from the scene disposes its geometry/material unless
   shared (see `disposeEnemy`, `SHARED_ENEMY_GEO`). New entity types need the same
-  treatment.
+  treatment. A geometry or texture that is *shared* — created once at module load and
+  outliving the objects that use it — also goes in `__probe.gpuShared`, which is what the
+  playtest's GPU-leak check reads to tell "shared" apart from "leaked".
 - **`resetGame` is the leak gate**: everything added to the scene per-run is cleared there,
   and new per-run state lives on `state` or `mods` and resets there too.
 - **Run modifiers**: per-run upgrade state lives in the `mods` object (`baseMods()`), reset

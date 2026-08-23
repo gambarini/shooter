@@ -268,12 +268,17 @@ export default async function chaos(ctx) {
   // would produce. Page errors are collected by the harness itself, so an exception
   // during this fails the run without a check of its own.
   //
-  // TWICE, for the same reason soak's GPU comparison is its second restart and not its
-  // first: the first pass is the first thing in this scenario to play long enough to
-  // reach pickups, novas and a full spawn cycle, so it MINTS the geometry those paths
-  // own. Measuring across it reads that warm-up as a leak. Pass 2 does the identical work
-  // on warm pools, so anything that grows across it grew per-kill — which is what a leak
-  // looks like and what this leg is for.
+  // TWICE, and the second pass is where the GPU comparison is taken: pass 1 is the first
+  // thing in this scenario to play long enough to reach pickups, novas and a full spawn
+  // cycle, so it is the pass that first DRAWS what those paths own — and it also warms the
+  // pools, so pass 2's growth is per-kill growth, which is the shape of a leak.
+  //
+  // The two passes deliberately do NOT replay the same input: `rand` is one stream across
+  // both, so pass 2 presses different keys at different things and the monkey covers twice
+  // as many combinations. That used to matter to the GPU check (a first draw in pass 2
+  // that pass 1 never made read as a leak) and since item 89 it does not — the check
+  // asserts that nothing is unreachable, and a first draw reaches the census and the
+  // renderer's counter in the same frame.
   const rand = rng(cfg.seed * 7919 + 13);
   const MONKEY_TICKS = 40;
   let novaFired = 0;
@@ -325,8 +330,8 @@ export default async function chaos(ctx) {
   const gpu = gpuAccounted(mid.snap, last.snap);
   ctx.check('the restart after the monkey pass leaks no GPU resources', gpu.over.length === 0,
             gpu.over.length ? gpu.over.join('; ')
-                            : `geometries ${last.snap.gpu.geometries}, textures ${last.snap.gpu.textures}, ` +
-                              `${gpu.allowance} new pooled object(s) across the second pass`);
+                            : `every one of ${last.snap.gpu.geometries} geometries and ` +
+                              `${last.snap.gpu.textures} textures is still reachable from the game`);
   ctx.log(`monkey pass 1 minted ${mid.snap.gpu.geometries - prev.gpu.geometries} geometr(ies) / ` +
           `${mid.snap.gpu.textures - prev.gpu.textures} texture(s) warming up; ` +
           `pass 2 added ${last.snap.gpu.geometries - mid.snap.gpu.geometries} / ` +

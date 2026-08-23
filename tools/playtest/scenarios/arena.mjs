@@ -74,6 +74,7 @@ async function shot(ctx, name, posed) {
   await ctx.eval(`const p = window.__probe; p.fixedDt = null; p.turbo = ${ctx.cfg.turbo}; return true;`);
 }
 
+const slots = a => a.sig.split('|');            // one 'x,z,hw,hd,h' record per live box
 const heights = a => a.sig.split('|').map(b => +b.split(',')[4]);
 const area = a => a.sig.split('|').reduce((t, b) => {
   const f = b.split(',').map(Number); return t + f[2] * 2 * f[3] * 2; }, 0);
@@ -206,6 +207,14 @@ export default async function arena(ctx) {
     ${PARK}
     p.state.toSpawn = 0;                       // same turn: the wave never spawns anything
     p.player.pos.x = ${b0[0]}; p.player.pos.z = ${b0[1]}; p.player.vel.set(0, 0, 0);
+    // Item 89 — startWave drops a free health pickup on every even wave, at a random spot
+    // it only clears against THIS wave's boxes. That one used to still be lying there, so
+    // the blockers were the player, the planted pickup and a third one wherever the seed
+    // put it — and whether the floor came up two boxes short or three was a coin flip the
+    // check below lost on commits that had touched nothing. Walking the strays onto the
+    // player's own square settles it either way: the pickup loop grabs them next frame,
+    // and if the wave clears first they are standing on a footprint already blocked.
+    p.live.pickups.forEach(q => q.group.position.set(p.player.pos.x, q.group.position.y, p.player.pos.z));
     p.fn.spawnPickup('health', ${b1[0]}, ${b1[1]});
     return true;`);
   // The gap opens with the upgrade screen, which halts update() — take a card, then let
@@ -213,20 +222,28 @@ export default async function arena(ctx) {
   await ctx.waitFor('window.__probe.state.choosing === true', { timeout: 20_000, label: 'upgrade screen' });
   await ctx.eval('window.__probe.fn.pickUpgrade(0); return true;');
   await ctx.waitFor('window.__probe.state.wave === 9', { timeout: 30_000, label: 'wave 9' });
+  // The planted pickup is found by position, not by index: startWave's own even-wave drop
+  // is still in the list until the pickup loop grabs it, and `pickups[0]` would then be
+  // that one rather than the one this leg is about.
   const gap = JSON.parse(await ctx.eval(`const p = window.__probe;
     const over = (x, z, pad) => p.obstacles.filter(o =>
       Math.abs(x - o.mesh.position.x) < o.hw + pad && Math.abs(z - o.mesh.position.z) < o.hd + pad).length;
+    const planted = p.live.pickups.slice().sort((a, b) =>
+      Math.hypot(a.group.position.x - ${b1[0]}, a.group.position.z - ${b1[1]}) -
+      Math.hypot(b.group.position.x - ${b1[0]}, b.group.position.z - ${b1[1]}))[0];
     return JSON.stringify({
       onPlayer: over(p.player.pos.x, p.player.pos.z, 0),
-      onPickup: p.live.pickups.length ? over(p.live.pickups[0].group.position.x,
-                                             p.live.pickups[0].group.position.z, 0) : -1,
+      onPickup: planted ? over(planted.group.position.x, planted.group.position.z, 0) : -1,
       pickups: p.live.pickups.length,
+      px: planted ? +planted.group.position.x.toFixed(1) : 0,
+      pz: planted ? +planted.group.position.z.toFixed(1) : 0,
       name: p.arena.name, wave: p.arena.wave, count: p.obstacles.length,
       x: +p.player.pos.x.toFixed(1), z: +p.player.pos.z.toFixed(1) });`));
   ctx.check('arena: no pillar rises through the player', gap.onPlayer === 0,
             `player at ${gap.x},${gap.z} inside ${gap.onPlayer} of ${gap.count} boxes`);
   ctx.check('arena: no pillar rises through a live pickup', gap.onPickup === 0,
-            `${gap.pickups} pickup(s), ${gap.onPickup} buried`);
+            `planted at ${b1[0]},${b1[1]}, found at ${gap.px},${gap.pz} — ` +
+            `${gap.pickups} pickup(s) live, ${gap.onPickup} buried`);
   // ...and the player stayed where they were parked. If the sinking wave-8 floor had
   // shoved them off the footprint first, the two checks above would be proving nothing.
   ctx.check('arena: the player held the ground the box wanted',
@@ -234,9 +251,23 @@ export default async function arena(ctx) {
             `parked at ${b0[0]},${b0[1]}, ended at ${gap.x},${gap.z}`);
   // ...and the gap still delivered the wave it was supposed to. A reconfigure that
   // protected the player by raising nothing at all would pass every check above.
-  ctx.check('arena: the gap delivered wave 9 whole',
-            gap.wave === 9 && gap.count >= nine.count - 2 && gap.name === nine.name,
-            `${gap.name}/${gap.count} for wave ${gap.wave}, wanted ${nine.name}/${nine.count}`);
+  //
+  // Item 89 — named box by named box, with no tolerance. This used to allow `count >= 10 - 2`,
+  // which is a number that has to be re-guessed every time an archetype is retuned, says
+  // nothing about WHICH boxes went missing, and passes just as happily when the guard drops
+  // the wrong two. Wave 9's floor minus the live floor must be exactly the two footprints
+  // this leg is standing on — so the same assertion now also proves the guard fired at all.
+  const held = slots(nine).filter(b => {
+    const f = b.split(',').map(Number);
+    return (f[0] === b0[0] && f[1] === b0[1]) || (f[0] === b1[0] && f[1] === b1[1]);
+  });
+  const live = slots((await ctx.snapshot()).arena);
+  const missing = slots(nine).filter(b => !live.includes(b));
+  ctx.check('arena: the gap delivered wave 9 whole but for the two footprints held',
+            gap.wave === 9 && gap.name === nine.name &&
+            missing.length === held.length && missing.every(b => held.includes(b)),
+            `${gap.name}/${gap.count} for wave ${gap.wave}, wanted ${nine.name}/${nine.count} ` +
+            `less the boxes at ${b0[0]},${b0[1]} and ${b1[0]},${b1[1]}; missing [${missing.join(' ')}]`);
 
   // ---- 6. the budget the fixed pool exists to protect -----------------------
   const snap = await ctx.snapshot();

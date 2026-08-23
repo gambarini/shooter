@@ -4813,6 +4813,22 @@ window.__probe = {
            trailSegs, waspTrail, rockets, enemyShots, pickups, mortarMarks },
   pools: { particlePool, tracerPool, dmgNumberPool, shockRingPool, flashPool, gibPool,
            trailSegPool, waspTrailPool, rocketPool, enemyShotPool, mortarMarkPool },
+  // Item 89 — the GPU resources this module creates ONCE and never disposes, plus the
+  // composer that owns every post-processing render target. The playtest's leak check
+  // works by subtraction: a resource the renderer still holds that the game can no
+  // longer reach is a leak. Everything below is permanently reachable from module
+  // scope, which no scene walk can see — a shared enemy geometry is invisible to one
+  // the moment the last enemy of that type dies, and that is exactly what used to read
+  // as "+1 geometry" on a commit that changed nothing (the flake item 89 chased).
+  //
+  // ADD TO THIS LIST when you add a shared geometry or texture that outlives the
+  // objects using it. Leaving one out does not go unnoticed: the harness asserts that the
+  // census covers every counted resource, so the omission reads as a leak from the first
+  // frame that draws the thing — at boot for anything on screen at the title card, and
+  // otherwise on every check from that frame on, rather than one run in five.
+  gpuShared: [PILLAR_GEO, TRACER_GEO, TRACER_TEX, PARTICLE_GEO, SHOCK_GEO, SCORCH_GEO, SCORCH_TEX,
+              GIB_GEO, TRAIL_GEO, ROCKET_GEO, ENEMY_SHOT_GEO, PICKUP_BEACON_GEO, BEACON_ALPHA,
+              MORTAR_RING_GEO, MORTAR_ZONE_GEO, FLASH_TEX, flashTex, ...SHARED_ENEMY_GEO, composer],
   // --- control ---
   fn: { startGame, resetGame, gameOver, startWave, showUpgrades, pickUpgrade, rerollUpgrades,
         selectWeapon, reload, togglePause, damagePlayer, returnToTitle, awardMedal,

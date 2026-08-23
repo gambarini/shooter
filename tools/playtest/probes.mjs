@@ -13,6 +13,50 @@ export const SNAPSHOT = `
   const info = p.renderer.info;
   const el = id => document.getElementById(id);
   const opa = id => (el(id) ? el(id).style.opacity : '?') || '';
+  // Item 89 — how many of the resources renderer.info counts the game can still REACH.
+  // three.js registers a 'dispose' listener on a geometry, a texture or a render target
+  // the first time it uploads it, and removes it on dispose, so that listener is exactly
+  // "counted by info.memory right now". Everything the game owns is reachable from four
+  // roots: the scene (the camera and the viewmodel hang off it), the pools, the live
+  // lists, and __probe.gpuShared — the module-scope singletons and the composer, which
+  // no scene walk can see. info.memory minus this census is what the game has LOST, and
+  // gpuAccounted below is the assertion over that number.
+  // (No backticks in this string: SNAPSHOT is itself a template literal.)
+  const uploaded = o => !!(o && o._listeners && o._listeners.dispose && o._listeners.dispose.length);
+  const gSeen = new Set(), tSeen = new Set();
+  // A render target's dispose listener sits on the TARGET, while what info.memory counted
+  // is its texture — so credit the texture and test the target, never the other way round.
+  const rt = t => { if (uploaded(t)) for (const x of t.textures || [t.texture]) if (x) tSeen.add(x.id); };
+  const mat = m => { for (const k in m) { const v = m[k]; if (v && v.isTexture && uploaded(v)) tSeen.add(v.id); } };
+  const hold = o => {
+    if (o.geometry && uploaded(o.geometry)) gSeen.add(o.geometry.id);
+    const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+    for (const m of mats) mat(m);
+    if (o.shadow && o.shadow.map) rt(o.shadow.map);   // lazily allocated on the first shadow frame
+  };
+  const walk = e => { const o = e && (e.mesh || e.sprite || e.group || e); if (o && o.traverse) o.traverse(hold); };
+  // The composer is handed over as one object, so the census digs for the resources
+  // hanging off its passes rather than naming three.js's own field layout. Depth-limited
+  // and cycle-guarded; Object3Ds hand back to the traverse above, and the renderer and
+  // the DOM are dead ends on purpose (walking a canvas element enumerates hundreds of
+  // accessors and reaches nothing the game owns).
+  const been = new Set();
+  const deep = (o, d) => {
+    if (!o || typeof o !== 'object' || d > 6 || been.has(o) || o.nodeType || o.isWebGLRenderer) return;
+    been.add(o);
+    if (o.isBufferGeometry) { if (uploaded(o)) gSeen.add(o.id); return; }
+    if (o.isTexture)        { if (uploaded(o)) tSeen.add(o.id); return; }
+    if (o.isWebGLRenderTarget) { rt(o); return; }
+    if (o.isObject3D)       { o.traverse(hold); return; }
+    if (o.isMaterial)       { mat(o); return; }
+    if (Array.isArray(o))   { for (const v of o) deep(v, d + 1); return; }
+    if (o instanceof Set || o instanceof Map) { o.forEach(v => deep(v, d + 1)); return; }
+    for (const k in o) deep(o[k], d + 1);
+  };
+  p.scene.traverse(hold);
+  for (const k in p.pools) p.pools[k].forEach(walk);
+  for (const k in p.live) p.live[k].forEach(walk);
+  for (const o of p.gpuShared || []) deep(o, 0);
   return {
     t: performance.now(),
     sceneChildren: p.scene.children.length,
@@ -20,6 +64,7 @@ export const SNAPSHOT = `
     pools: counts(p.pools),
     census: { pointLights, meshes, sprites },
     gpu: { geometries: info.memory.geometries, textures: info.memory.textures,
+           reachGeo: gSeen.size, reachTex: tSeen.size,
            programs: info.programs ? info.programs.length : -1,
            calls: info.render.calls, triangles: info.render.triangles },
     state: JSON.parse(JSON.stringify(p.state)),
@@ -125,8 +170,6 @@ export function poolTotals(snap) {
   return t;
 }
 
-export const sumPools = snap => Object.values(poolTotals(snap)).reduce((a, b) => a + b, 0);
-
 export function conservationViolations(prev, next) {
   const a = poolTotals(prev), b = poolTotals(next), bad = [];
   for (const k of Object.keys(a)) if (b[k] < a[k]) bad.push(`${k}: ${a[k]} -> ${b[k]} (${a[k] - b[k]} lost)`);
@@ -146,7 +189,8 @@ const RESET_IGNORE_EXACT = new Set([
   // Pooled objects can own GPU resources — every damage number mints a CanvasTexture —
   // so these grow legitimately whenever a pool grows. They get their own accounted
   // check (gpuAccounted) instead of a flat equality that would cry leak every run.
-  'gpu.geometries', 'gpu.textures',
+  // `reachGeo`/`reachTex` move with them, for the same reason and by the same amount.
+  'gpu.geometries', 'gpu.textures', 'gpu.reachGeo', 'gpu.reachTex',
 ]);
 // Whole subtrees. Pools legitimately grow across a run; conservation covers them.
 const RESET_IGNORE_SUBTREE = ['pools.'];
@@ -172,16 +216,34 @@ export function resetDiff(a, b) {
   return diffs;
 }
 
-// Geometry/texture counts may only grow as fast as pools mint new objects: each newly
-// pooled object can own at most one of each. Run against two consecutive restarts —
-// by then pools are warm, so the allowance is a handful of objects and the check is
-// tight enough to catch a dropped disposeEnemy (which leaks ~1 geometry per kill).
+// A leak is an uploaded GPU resource the game can no longer reach: `disposeEnemy` not
+// called leaves the geometry in the renderer's registry with nothing pointing at it.
+// That number — `info.memory` minus SNAPSHOT's census — is what this asserts on, and it
+// must be ZERO. Not "must not grow": every root the game has is walked, so on a clean
+// build every counted resource is reached and there is nothing left over to tolerate.
+//
+// Item 89 — why it is an absolute and not a difference. It used to diff `info.memory`
+// itself against "how many objects the pools minted", and that was structurally flaky:
+// info.memory counts a resource when it is first RENDERED, not when it is created, so a
+// shared singleton the run happened not to draw until the second leg (a wasp's cone, a
+// splitter's mini) read as "+1 geometry, 0 new pooled objects" — red on a commit that
+// changed nothing. Measured over 16 headless CI-shape runs of one unchanged build, that
+// first-draw noise moved `geometries` 42–47 and `textures` 19–24 between two t = 0
+// snapshots, and the old check's pooled allowance swung 0/4/7/22/33/40/56/58 — whether a
+// +1 passed depended on where that number landed. Under the census the leftover is 0 at
+// every sample of every scenario, on a cold boot and 24 s into a wave alike.
+//
+// It fails on exactly two things, and both deserve a red run: a resource nothing
+// disposed, and a shared singleton missing from `__probe.gpuShared` (which is the same
+// bug seen from the harness — the game can reach it, but it never said so).
 export function gpuAccounted(prev, next) {
-  const allowance = sumPools(next) - sumPools(prev);
   const over = [];
-  for (const k of ['geometries', 'textures']) {
-    const grew = next.gpu[k] - prev.gpu[k];
-    if (grew > allowance) over.push(`${k} +${grew} with only ${allowance} new pooled object(s)`);
+  for (const [count, reach] of [['geometries', 'reachGeo'], ['textures', 'reachTex']]) {
+    const before = prev.gpu[count] - prev.gpu[reach], after = next.gpu[count] - next.gpu[reach];
+    if (after > 0) over.push(`${count}: ${after} of ${next.gpu[count]} counted are uploaded but ` +
+      `unreachable (${before} before this leg) — nothing disposed them, or a shared one is ` +
+      `missing from __probe.gpuShared`);
   }
-  return { over, allowance };
+  return { over, unreachable: { geometries: next.gpu.geometries - next.gpu.reachGeo,
+                                textures: next.gpu.textures - next.gpu.reachTex } };
 }

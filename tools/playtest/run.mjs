@@ -215,6 +215,22 @@ try {
   ctx.check('boot: test API published', version === 1, `__probe.version=${version}`);
   if (version !== 1) throw new Error('window.__probe is missing or a different version');
 
+  // Item 89 — the GPU-leak checks rest on SNAPSHOT's reachable census, and this is the
+  // tripwire under it: on a freshly booted title screen the game has leaked nothing, so
+  // every resource `renderer.info` counts must be one the census reaches. Two ways to
+  // break that, both of which would otherwise turn into a flaky gate rather than a
+  // failure. Pin three to a version that renames the 'dispose' listener the census reads
+  // and the count silently goes to zero, taking every leak check with it — that fails
+  // here, at boot, on a scene that has leaked nothing. Add a shared geometry or texture
+  // without listing it in `__probe.gpuShared` and it reads as unreachable from the first
+  // frame that draws it: at boot if it is drawn at boot, and otherwise at every leg check
+  // from then on, which is a standing failure rather than the coin flip it used to be.
+  const gpu0 = (await ctx.snapshot()).gpu;
+  ctx.check('boot: the GPU census accounts for every uploaded resource',
+            gpu0.reachGeo === gpu0.geometries && gpu0.reachTex === gpu0.textures,
+            `${gpu0.reachGeo}/${gpu0.geometries} geometries and ${gpu0.reachTex}/${gpu0.textures} ` +
+            `textures reached — see __probe.gpuShared`);
+
   // 6. bot
   await cdp.eval(readFileSync(join(HERE, 'bot.js'), 'utf8') + '\nreturn true;');
 

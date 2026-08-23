@@ -4,9 +4,10 @@
 //
 // It restarts TWICE, and the two restarts do different jobs:
 //   run 1 -> run 2   catches per-run state a resetGame() forgot to clear.
-//   run 2 -> run 3   catches leaked GPU resources. It has to be this leg: by then the
-//                    object pools are warm, so "geometries grew" can no longer be
-//                    explained away by a pool minting new objects.
+//   run 2 -> run 3   catches leaked GPU resources — resources the renderer still holds
+//                    that the game can no longer reach. It stays on this leg because a
+//                    restart is the moment resetGame's disposal either happened or did
+//                    not; see gpuAccounted for what the comparison is and is not.
 //
 // Both comparisons snapshot in the SAME JavaScript turn as the button click that
 // starts the run (both handlers are synchronous), so both are exactly "t = 0 of a
@@ -78,8 +79,8 @@ export default async function soak(ctx) {
   ctx.check('restart leaks no GPU resources: geometries and textures stayed accounted for',
             gpu.over.length === 0,
             gpu.over.length ? gpu.over.join('; ')
-                            : `geometries ${snapC.gpu.geometries}, textures ${snapC.gpu.textures}, ` +
-                              `${gpu.allowance} new pooled object(s) between restarts`);
+                            : `every one of ${snapC.gpu.geometries} geometries and ` +
+                              `${snapC.gpu.textures} textures is still reachable from the game`);
   const diffs3 = resetDiff(snapB, snapC);
   ctx.check('second restart leaks no state either', diffs3.length === 0,
             diffs3.length ? `${diffs3.length} field(s) differ` : '');

@@ -37,7 +37,7 @@ Before believing any FPS number:
 | --- | --- |
 | `window.__neonReady`, `__probe.version` | a dead CDN import, a boot exception |
 | **run 1 → run 2 state diff** | any per-run field a new item forgot to clear in `resetGame` — reported **by name** |
-| **run 2 → run 3 GPU diff** | leaked geometries/textures (a dropped `dispose`) |
+| **GPU census, on every restart leg** | a geometry or texture the renderer still holds that the game can no longer reach — a dropped `dispose`, or a shared resource missing from `__probe.gpuShared` |
 | pool conservation | a pooled object dropped instead of returned to its free list |
 | point-light census | the hard budget that once took wave 13 to ~6 FPS |
 | idle-DOM snapshot | CSS-only leaks like item 56's damage flash |
@@ -57,6 +57,44 @@ The state diff is the one worth understanding: two snapshots are taken **in the 
 JavaScript turn as the button click that starts a run**, so both are exactly "t = 0 of a
 run" and every difference between them is a leak, not timing noise. It needs no
 maintenance — a field added to `state` or `mods` next year is covered the day it lands.
+
+### The GPU census, and why it has no tolerance (item 89)
+
+`renderer.info.memory` counts a resource when the renderer first **uploads** it, which is
+the frame it is first *drawn* — not the moment it was created. Any check that reads those
+counters directly is therefore reading play, not correctness: whether a wasp's cone or a
+splitter's mini happened to be drawn before the snapshot moves them. That is what made
+this gate flaky. Over 16 headless CI-shape runs of one unchanged build, first-draw noise
+moved `geometries` 42–47 and `textures` 19–24 between two t = 0 snapshots, and the old
+check's pooled-object allowance swung 0 / 4 / 7 / 22 / 33 / 40 / 56 / 58 — so whether a
+`+1` passed depended on where that number landed rather than on the commit.
+
+So `SNAPSHOT` counts the other side instead: how many of those resources the game can
+still **reach**. three.js registers a `'dispose'` listener on a geometry, texture or
+render target the first time it uploads it and removes it on disposal, so that listener
+means exactly "counted by `info.memory` right now". The census walks every root the game
+has — the scene (the camera and viewmodel hang off it), the pools, the live lists, and
+`__probe.gpuShared` for the module-scope singletons and the composer that no scene walk
+can see — and credits every uploaded resource it finds. `info.memory` minus the census is
+what the game has *lost*.
+
+On a clean build that number is **0**, at every sample of every scenario: a cold title
+screen, 24 s into a wave, and either side of all ten restarts. The walk is what a snapshot
+now spends most of its time on — 0.06 ms → 1.06 ms per `SNAPSHOT`, measured mid-wave —
+which is still nothing against the 60–400 ms poll intervals that take them, and it buys a
+census that no new material slot or entity type can silently fall out of. So `gpuAccounted` asserts
+zero rather than "did not grow" — no warm-up leg, no measured spread, nothing to re-tune
+when an archetype changes. A first draw raises the counter and the census together and
+cannot move it; only losing a resource can.
+
+Two things make it go red, and both should. Dropping the geometry disposal from
+`disposeEnemy` puts 20 unreachable geometries on the board by soak's third run. Adding a
+shared geometry or texture and not listing it in `__probe.gpuShared` reads the same way —
+the game can reach it, but it never said so — and, being a standing condition rather than
+a first-draw race, it fails every run instead of one in five. The boot check
+(`the GPU census accounts for every uploaded resource`) catches both at the title screen
+when the resource is drawn that early, and is also the tripwire for the day a three.js
+upgrade renames the internal the census reads.
 
 ## How it drives the game
 
@@ -232,12 +270,14 @@ diff and pool-conservation law unchanged. Four things it must keep doing:
   unattended run on the pause card and every later wait times out. Pause is tested as its
   own verb instead, where the resume is guaranteed.
 
-Its monkey pass runs **twice**, for the same reason soak's GPU comparison is its second
-restart: pass 1 is the first thing in the scenario to play long enough to reach pickups,
-novas and a full spawn cycle, so it mints the geometry those paths own (15 geometries and
-3 textures, measured) and a comparison across it reads warm-up as a leak. Pass 2 does the
-identical work on warm pools and adds nothing, which is what makes the GPU check across it
-tight enough to mean something.
+Its monkey pass runs **twice**. Pass 1 is the first thing in the scenario to play long
+enough to reach pickups, novas and a full spawn cycle; pass 2 does the same work on warm
+pools, so anything that grows across it grew per-kill, which is the shape of a leak. The
+two passes deliberately do not replay the same input — `rand` is one stream across both,
+so pass 2 presses different keys at different things and the monkey covers twice as many
+combinations. That used to be in tension with the GPU check, because a first draw in pass
+2 that pass 1 never made read as a leak; under the census above it does not, and the check
+is taken after pass 2 for the per-kill signal alone.
 
 `arena` (item 82) is the shape for a scenario whose subject is a **pure function**, and it
 is the cheapest kind of check in the rig — ~6 seconds, because it never plays a wave. The
@@ -372,7 +412,10 @@ Its `.playtest/boss-*.png` frames are the aesthetic half, same bargain as `layou
 silhouette, the amber, and whether a ground telegraph reads as a warning are for a human.
 
 `--url` against the live site fails the NAME-row checks until the fix deploys; that is the
-lag between `main` and Pages, not a regression.
+lag between `main` and Pages, not a regression. The same lag applies to the GPU census: a
+build that predates `__probe.gpuShared` (item 89) cannot be walked completely, so
+`boot: the GPU census accounts for every uploaded resource` — and the two restart leak
+checks behind it — go red against the live site until this commit is the one deployed.
 
 Chrome's own window stays at `--window-size=1280,860` (`chrome.mjs`), and that is no
 longer a workaround for the title card: the frame-time sample is only comparable to a
