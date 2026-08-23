@@ -383,7 +383,7 @@ that is for reviewing what the poses frame, not for diffing.
 reaches. The soak clears four waves and dies, so wave 5 and wave 10 were unverified
 territory — it jumps there with `startWave(N)`, zeroes `state.toSpawn`, and kills whatever
 the wave already queued, so every count it reports is about the boss and nothing else.
-Five things it must keep doing:
+Six things it must keep doing:
 
 - **`__probe.fn.damageEnemy`** — `bossEnrage` fires from *inside* `damageEnemy`, so writing
   `boss.hp` from the outside reaches 40% hp without ever entering phase 2, and "phase 2
@@ -401,9 +401,9 @@ Five things it must keep doing:
 - **turbo 1 around each screenshot.** At turbo 6 the ~120 ms between aiming the camera and
   the shutter is four simulated seconds — every telegraph the frame exists to show has
   already detonated, and you photograph the crater.
-- **sample and act in ONE eval, never across a round trip** (item 90). Both barrage-
-  ownership checks used to read the live mark count, then kill the boss (or restart) in a
-  second `ctx.eval`. A mortar telegraph lives 1.1 s of *simulated* time, which at turbo 6
+- **sample and act in ONE eval, never across a round trip** (item 90). All three
+  barrage-pool checks used to read the live mark count, then kill the boss (or restart, or
+  compare against a peak) in a second `ctx.eval`. A mortar telegraph lives 1.1 s of *simulated* time, which at turbo 6
   is ~180 ms of wall clock, so the 60 ms `waitFor` poll that opened the leg could legally
   observe a volley with **4 ms of fuse left** — measured — and the next round trip cost
   more than that. The whole volley then expired in the gap, the baseline read 0, and the
@@ -412,10 +412,23 @@ Five things it must keep doing:
   fails loudly if a volley was never caught rather than passing vacuously. It also
   *strengthens* both assertions: `clearMortarMarks` runs synchronously inside `killEnemy`,
   so the barrage must be gone in the same turn as the kill — the split version passed just
-  as happily when the fuses had merely burned out on their own — and the reset's pool
-  arithmetic can now be exact (`pool + live`) instead of "the pool moved". This is the
-  general shape for any check on state with a fuse on it: **the game may not tick between
-  the read and the thing the read is about.**
+  as happily when the fuses had merely burned out on their own — and the pool arithmetic
+  can now be exact (`pool + live`) instead of "the pool moved". This is the general shape
+  for any check on state with a fuse on it: **the game may not tick between the read and
+  the thing the read is about.**
+- **state the pool as a law that can fail** (item 91). `mortarMarks` and `mortarMarkPool`
+  only exchange members, so `live + pooled` never *falls* — it is not invariant, since a
+  volley wider than the pool mints the difference — and across a window with no spawns the
+  pool grows by exactly the marks that burned down. All three legs now assert that
+  equality. The version item 91 replaced compared the pool against `peak1 - s.marks`, and
+  the poll loop above it exits with the volley still airborne, so `peak1 === s.marks` and
+  it reduced to `0 >= 0`: it read `3 live, 0 in the pool` on every run of item 90's session
+  and passed. The phase-1 leg buys its quiet window by parking `b.fireCD` in the same eval
+  that samples — `spawnMortarMark` has exactly one caller, the artillery boss's branch of
+  `update`, and siege minis are `type: 'chaser'` — and restores it on every exit, drained
+  or not, so a leaked `1e3` cannot fail `phase 2 escalates` three checks downstream. Every
+  one of the three is forcing-tested by deleting the `mortarMarkPool.push` in
+  `freeMortarMark`; if a rewrite still passes that, it is not checking the pool.
 
 It also runs one wave 10 with the regular spawn queue **left alone**. The isolation the
 other legs depend on is exactly what could hide a broken mini cap: a real boss wave queues

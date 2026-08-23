@@ -71,6 +71,12 @@ async function shot(ctx, name, atMark = false) {
 
 // One compact read of everything this scenario asserts on. Same rule as the rest of the
 // rig: through `__probe`, never by fingerprinting the scene graph.
+//
+// It carries the live mark count but deliberately NOT the pool (item 91). The pool is half
+// of a conservation law whose other half is the live count in the same JavaScript turn, and
+// a pool field on a separate round-trip snapshot is exactly the shape that let the old
+// pooling check compare a stale peak against a fresh read and assert nothing at all. The
+// three legs that care read both sides together, in an eval of their own.
 const STATUS = `const p = window.__probe;
   const b = p.enemies.find(e => e.type === 'boss');
   let lights = 0; p.scene.traverse(o => { if (o.isPointLight) lights++; });
@@ -81,7 +87,7 @@ const STATUS = `const p = window.__probe;
                 fireCD: +b.fireCD.toFixed(2),
                 dist: +Math.hypot(b.mesh.position.x - p.player.pos.x,
                                   b.mesh.position.z - p.player.pos.z).toFixed(1) } : null,
-    marks: p.live.mortarMarks.length, markPool: p.pools.mortarMarkPool.length,
+    marks: p.live.mortarMarks.length,
     minis: p.enemies.filter(e => e.mini).length,
     siegeMinis: p.enemies.filter(e => e.mini && e.siege).length, enemies: p.enemies.length,
     shots: p.live.enemyShots.length, lights,
@@ -148,8 +154,65 @@ export default async function boss(ctx) {
   ctx.check('the barrage telegraphs before it lands (3+ ground marks in one volley)', peak1 >= 3,
             `peak ${peak1} marks, standoff ${s.boss ? s.boss.dist : '?'} units`);
   if (s.marks > 0) { await shot(ctx, 'phase1-barrage'); await shot(ctx, 'telegraph', true); }
-  ctx.check('mortar marks are pooled, not leaked', s.markPool >= peak1 - s.marks,
-            `${s.marks} live, ${s.markPool} in the pool`);
+
+  // ------------------------------------------------------------------ the pool, stated as a law
+  // `mortarMarks` and `mortarMarkPool` only ever exchange members: a spawn pops a group off
+  // the pool or mints one when the pool is empty, and every release pushes one back. So
+  // `live + pooled` can never FALL, and across a window with no spawns in it the pool must
+  // grow by exactly the marks that burned down. It is NOT invariant, whatever is convenient
+  // to say — a volley wider than the pool mints the difference and the total steps up. Only
+  // the non-decrease holds unconditionally, and the equality below buys its exactness by
+  // making the window quiet rather than by assuming it.
+  //
+  // What this replaces (item 91) asserted `markPool >= peak1 - s.marks`. The poll loop above
+  // breaks as soon as it has seen a volley, so `s.marks` is still `peak1` and the whole thing
+  // reduces to `0 >= 0`: a pool that had never received a single decal passed it. One did,
+  // reading `3 live, 0 in the pool`, on every run of item 90's session.
+  //
+  // Parking the reload is what makes the window quiet. `spawnMortarMark` has exactly one
+  // caller — the `type === 'boss' && bossKind === 'artillery'` branch of `update` — and siege
+  // minis are `type: 'chaser'`, so a boss that cannot reload cannot put anything new in the
+  // air, and the only traffic left is the volley we measured draining into the pool.
+  // Sampling and parking in ONE eval is item 90's rule, for item 90's reason: at turbo 6 the
+  // 1.1 s fuse is ~180 ms of wall clock, and a second round trip is long enough for the
+  // volley to expire and the next one to launch out of the pool we are about to count.
+  let vol = null;
+  for (let i = 0; i < 200 && !vol; i++) {
+    vol = JSON.parse(await ctx.eval(`const p = window.__probe;
+      const b = p.enemies.find(e => e.type === 'boss');
+      const live = p.live.mortarMarks.length;
+      if (!b || !live) return JSON.stringify({ live, boss: !!b });
+      b.fireCD = 1e3;                        // no new shells until this volley is counted
+      return JSON.stringify({ live, boss: true, pooled: p.pools.mortarMarkPool.length });`));
+    if (vol.boss && vol.live > 0) break;     // caught a volley with the reload parked
+    if (!vol.boss) break;                    // nothing firing; the check below says so
+    vol = null;
+    await tickAlive();                       // keep the dummy alive so the boss keeps firing
+    await sleep(30);
+  }
+  if (vol && vol.boss && vol.live > 0) {
+    // Bounded by hand rather than with `waitFor`, which throws on timeout: a barrage that
+    // never drains has to land as a red check with its numbers in the detail, not as an
+    // exception that takes the remaining twenty checks of this scenario down with it.
+    for (let i = 0; i < 200; i++) {
+      if (await ctx.eval('return window.__probe.live.mortarMarks.length === 0;')) break;
+      await tickAlive();
+      await sleep(50);
+    }
+    // The reload goes back on EVERY exit from the window, drained or not. A `1e3` leaking
+    // past here would surface as `phase 2 escalates: volleys come faster` going red, three
+    // checks downstream of anything that is actually wrong.
+    Object.assign(vol, JSON.parse(await ctx.eval(`const p = window.__probe;
+      const b = p.enemies.find(e => e.type === 'boss');
+      const after = p.live.mortarMarks.length, poolAfter = p.pools.mortarMarkPool.length;
+      if (b) b.fireCD = 0.05;
+      return JSON.stringify({ after, poolAfter });`)));
+  }
+  ctx.check('a spent volley returns every mark to the pool',
+            !!vol && vol.boss && vol.after === 0 && vol.poolAfter === vol.pooled + vol.live,
+            !vol ? 'no live barrage was ever caught to measure the pool over'
+                 : !vol.boss ? 'no artillery boss was alive to fire a volley'
+                 : `live ${vol.live} → ${vol.after}, pool ${vol.pooled} → ${vol.poolAfter}`);
 
   // The shells hit, and the recap says what hit you. `lastHitBy` is exactly the string
   // the death card prints, so this is the killed-by check.
@@ -221,10 +284,10 @@ export default async function boss(ctx) {
   for (let i = 0; i < 200 && !kill; i++) {
     kill = JSON.parse(await ctx.eval(`const p = window.__probe;
       const b = p.enemies.find(e => e.type === 'boss');
-      const before = p.live.mortarMarks.length;
+      const before = p.live.mortarMarks.length, poolBefore = p.pools.mortarMarkPool.length;
       if (!b || !before) return JSON.stringify({ before, boss: !!b });
       p.fn.damageEnemy(b, 1e9);
-      return JSON.stringify({ before, boss: true, after: p.live.mortarMarks.length,
+      return JSON.stringify({ before, poolBefore, boss: true, after: p.live.mortarMarks.length,
                               pooled: p.pools.mortarMarkPool.length });`));
     if (kill.boss && kill.before > 0) break;      // killed under a live barrage — assert on it
     if (!kill.boss) break;                        // nothing left to kill; the check below says so
@@ -234,10 +297,24 @@ export default async function boss(ctx) {
   }
   // Never catching a volley is a failure, not a pass — the same rule `chaos` follows for
   // a hostile moment it never reached.
+  //
+  // It also asserts the pool, not just the emptying (item 91). `after === 0` alone passes a
+  // bare `mortarMarks.length = 0`, which clears the array and drops every group on the
+  // floor; only the restart twin downstream would have caught that. `clearMortarMarks` runs
+  // synchronously inside `killEnemy`, so within this one JavaScript turn every mark that was
+  // in the air must have moved into the pool and nothing else can have touched either side —
+  // the same conservation law the phase-1 leg states, and exact for the same reason. The
+  // pooled count was already being printed here; it was simply never checked.
+  //
+  // Three detail strings, not two: `boss: false` means the retry loop found marks in the air
+  // but no boss to kill, which is a different failure from never catching a volley, and the
+  // string they used to share sent the next reader looking for the wrong one.
   ctx.check('killing the boss takes its live barrage with it',
-            !!kill && kill.boss && kill.before > 0 && kill.after === 0,
-            kill && kill.boss ? `${kill.before} marks in the air → ${kill.after}, ${kill.pooled} pooled`
-                              : 'no live barrage was ever caught to kill the boss under');
+            !!kill && kill.boss && kill.before > 0 && kill.after === 0
+              && kill.pooled === kill.poolBefore + kill.before,
+            !kill ? 'no live barrage was ever caught to kill the boss under'
+                  : !kill.boss ? `no boss left to kill, with ${kill.before} marks in the air`
+                  : `${kill.before} marks in the air → ${kill.after}, pool ${kill.poolBefore} → ${kill.pooled}`);
   s = await status();
   ctx.check('the boss bar clears when the boss dies', !s.boss, s.bossWrap);
 
