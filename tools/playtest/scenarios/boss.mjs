@@ -201,7 +201,14 @@ export default async function boss(ctx) {
   ctx.check('the barrage telegraphs before it lands (3+ ground marks in one volley)', v1.max >= 3,
             `widest of ${v1.n} volleys ${v1.max} marks, standoff ${s.boss ? s.boss.dist : '?'} units`);
   ctx.log(`phase 1 volley widths: ${v1.widths.join(' ')}`);
-  if (s.marks > 0) { await shot(ctx, 'phase1-barrage'); await shot(ctx, 'telegraph', true); }
+  // Unconditional since item 92, and it has to be: what closes the twelfth burst is the poll
+  // that sees the ground EMPTY, so the sampler returns in the quiet between volleys and the
+  // `s.marks > 0` guard that used to stand here skipped both frames on almost every run —
+  // leaving the human half of this item looking at whichever pair a much older session
+  // happened to catch. Waiting for a live volley is `shot`'s own job (`atMark`), and only
+  // the telegraph frame needs it; `phase1-barrage` is a portrait of the boss.
+  await shot(ctx, 'phase1-barrage');
+  await shot(ctx, 'telegraph', true);
 
   // ------------------------------------------------------------------ the pool, stated as a law
   // `mortarMarks` and `mortarMarkPool` only ever exchange members: a spawn pops a group off
