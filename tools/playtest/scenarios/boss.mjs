@@ -69,6 +69,58 @@ async function shot(ctx, name, atMark = false) {
   await ctx.eval(`window.__probe.turbo = ${ctx.cfg.turbo}; return true;`);
 }
 
+// How many volleys each phase is sampled over, and the poll that measures them (item 92).
+//
+// Twelve is set by what the assertion needs to see rather than by patience: phase 1 has to
+// roll a narrow volley and phase 2 a wide one for their ranges to be comparable at all, and
+// each is a coin. Twelve puts a missed extreme at 1 in 4096. It costs ~7 s of wall clock in
+// phase 1 (ART_CD1 3.4 s at turbo 6) and ~4 s in phase 2.
+//
+// 40 ms, not the 100 ms the rest of this file polls at, because the thing being measured is
+// short: at turbo 6 a phase-2 volley is on the ground for ~180 ms and the quiet after it is
+// another ~180 ms, and a poll that steps over either one merges two volleys into a single
+// impossible width. `SANE_WIDTH` is the tripwire for exactly that.
+const VOLLEYS = 12, VOLLEY_POLL = 40, SANE_WIDTH = 6;
+
+// Measure volleys from outside, one at a time.
+//
+// What makes that possible: every shell of a volley is spawned inside ONE frame of `update`
+// and every mark carries the same MORTAR_FUSE, so they land together too — the live count is
+// flat for a volley's whole life. And both reloads are longer than the fuse (ART_CD1 3.4 s,
+// ART_CD2 2.2 s vs 1.1 s), so real empty ground separates one volley from the next. A
+// contiguous run of non-zero polls is therefore exactly one volley, and its count is the
+// volley's width.
+//
+// Both of those are properties of the game, not of the harness, so the sampler says out loud
+// when they stop holding: a burst wider than any legal volley means the poll missed the gap
+// and glued two together, and such a sample is dropped rather than counted (it would inflate
+// a maximum and pass the escalation check for the wrong reason). The tally rides along in
+// the caller's detail string.
+//
+// Returns the widths, their range, and the widest reload seen — the escalation checks read
+// the two phases through one instrument, which is the point.
+async function sampleVolleys(ctx, want, polls) {
+  const widths = [];
+  let cur = 0, cdMax = 0, merged = 0;
+  for (let i = 0; i < polls && widths.length < want; i++) {
+    const r = JSON.parse(await ctx.eval(`const p = window.__probe;
+      p.player.hp = p.player.maxHp;              // the dummy has to outlive its own window
+      const b = p.enemies.find(e => e.type === 'boss');
+      return JSON.stringify({ marks: p.live.mortarMarks.length, boss: !!b,
+                              cd: b ? +b.fireCD.toFixed(2) : 0 });`));
+    cdMax = Math.max(cdMax, r.cd);
+    if (r.marks > 0) cur = Math.max(cur, r.marks);
+    else if (cur > 0) { if (cur > SANE_WIDTH) merged++; else widths.push(cur); cur = 0; }
+    if (!r.boss) break;                          // nothing left firing; the caller says so
+    await sleep(VOLLEY_POLL);
+  }
+  // A volley still on the ground when the window closes is not counted: it is the one burst
+  // whose end was never observed, so it is also the one whose width is not yet established.
+  return { widths, n: widths.length, cdMax, merged,
+           min: widths.length ? Math.min(...widths) : 0,
+           max: widths.length ? Math.max(...widths) : 0 };
+}
+
 // One compact read of everything this scenario asserts on. Same rule as the rest of the
 // rig: through `__probe`, never by fingerprinting the scene graph.
 //
@@ -142,17 +194,13 @@ export default async function boss(ctx) {
             `${s.boss ? s.boss.fireCD : '?'}s before the opening volley, ${s.marks} marks`);
 
   // Telegraphs: the first volley must WAIT (the item-49 intro owns the first ~3 seconds),
-  // then paint several ground decals at once.
-  let peak1 = 0, cdMax1 = 0, sawMarks = false;
-  for (let i = 0; i < 90 && !(sawMarks && s.boss && s.boss.phase === 1 && cdMax1 > 0); i++) {
-    s = await tickAlive();
-    peak1 = Math.max(peak1, s.marks); cdMax1 = Math.max(cdMax1, s.boss ? s.boss.fireCD : 0);
-    if (s.marks > 0) sawMarks = true;
-    if (sawMarks && i > 40) break;
-    await sleep(100);
-  }
-  ctx.check('the barrage telegraphs before it lands (3+ ground marks in one volley)', peak1 >= 3,
-            `peak ${peak1} marks, standoff ${s.boss ? s.boss.dist : '?'} units`);
+  // then paint several ground decals at once. `VOLLEYS` of them, so the phase-2 comparison
+  // downstream has a window of the same size to compare against.
+  const v1 = await sampleVolleys(ctx, VOLLEYS, 300);
+  s = await tickAlive();
+  ctx.check('the barrage telegraphs before it lands (3+ ground marks in one volley)', v1.max >= 3,
+            `widest of ${v1.n} volleys ${v1.max} marks, standoff ${s.boss ? s.boss.dist : '?'} units`);
+  ctx.log(`phase 1 volley widths: ${v1.widths.join(' ')}`);
   if (s.marks > 0) { await shot(ctx, 'phase1-barrage'); await shot(ctx, 'telegraph', true); }
 
   // ------------------------------------------------------------------ the pool, stated as a law
@@ -164,10 +212,11 @@ export default async function boss(ctx) {
   // the non-decrease holds unconditionally, and the equality below buys its exactness by
   // making the window quiet rather than by assuming it.
   //
-  // What this replaces (item 91) asserted `markPool >= peak1 - s.marks`. The poll loop above
-  // breaks as soon as it has seen a volley, so `s.marks` is still `peak1` and the whole thing
-  // reduces to `0 >= 0`: a pool that had never received a single decal passed it. One did,
-  // reading `3 live, 0 in the pool`, on every run of item 90's session.
+  // What this replaces (item 91) asserted `markPool >= peak1 - s.marks` against the telegraph
+  // loop that used to stand where the phase-1 sampler now does. That loop broke off as soon
+  // as it had seen a volley, so `s.marks` was still the peak and the whole thing reduced to
+  // `0 >= 0`: a pool that had never received a single decal passed it. One did, reading
+  // `3 live, 0 in the pool`, on every run of item 90's session.
   //
   // Parking the reload is what makes the window quiet. `spawnMortarMark` has exactly one
   // caller — the `type === 'boss' && bossKind === 'artillery'` branch of `update` — and siege
@@ -249,17 +298,33 @@ export default async function boss(ctx) {
   await ctx.waitFor(`(window.__probe.enemies.find(e => e.type === 'boss') || {}).staggerT <= 0`,
                     { timeout: 20_000, poll: 100, label: 'the stagger to end' });
 
-  let peak2 = 0, cdMax2 = 0;
-  for (let i = 0; i < 60; i++) {
-    s = await tickAlive();
-    peak2 = Math.max(peak2, s.marks); cdMax2 = Math.max(cdMax2, s.boss ? s.boss.fireCD : 0);
-    await sleep(100);
-  }
-  ctx.check('phase 2 escalates: volleys come faster', cdMax2 > 0 && cdMax2 < cdMax1,
-            `reload ${cdMax1}s → ${cdMax2}s`);
-  ctx.check('phase 2 escalates: volleys get wider', peak2 >= peak1,
-            `${peak1} marks per volley → ${peak2}`);
-  if (peak2 > 0) await shot(ctx, 'phase2-barrage');
+  const v2 = await sampleVolleys(ctx, VOLLEYS, 300);
+  s = await tickAlive();
+  ctx.log(`phase 2 volley widths: ${v2.widths.join(' ')}`);
+  ctx.check('phase 2 escalates: volleys come faster', v2.cdMax > 0 && v2.cdMax < v1.cdMax,
+            `reload ${v1.cdMax}s → ${v2.cdMax}s`);
+  // Item 92 — the whole range moves up, over two windows of the same size.
+  //
+  // `shells` is `(phase === 2 ? 4 : 3) + (Math.random() < 0.5 ? 1 : 0)`: phase 1 draws from
+  // {3,4} and phase 2 from {4,5}. So the version this replaces — `peak2 >= peak1` — was true
+  // for every legal pair of those sets, and a regression that flattened phase 2 back to
+  // `3 + coin` passed it unchanged. Worse, it read convincingly only because the two windows
+  // were different sizes: phase 1 broke off after ONE volley while phase 2 polled sixty
+  // times and reached its maximum, so the comparison was biased toward passing before the
+  // assertion was ever reached.
+  //
+  // Both ends, strictly, is the law that survives a future escalation (a phase 2 widened to
+  // 5 + coin still passes) while being false the moment the two phases fire the same volley.
+  // It costs sample size: seeing a 3 in phase 1 and a 5 in phase 2 each need a coin to land,
+  // so a window of one volley could not assert this at all. Twelve puts a missed extreme at
+  // 1 in 4096 per phase — and the floor below turns an empty window into a red check rather
+  // than the vacuous pass a `Math.min` of nothing would give.
+  const wider = v1.n >= 6 && v2.n >= 6 && v2.min > v1.min && v2.max > v1.max;
+  ctx.check('phase 2 escalates: volleys get wider', wider,
+            `phase 1: ${v1.n} volleys of ${v1.min}–${v1.max} marks → ` +
+            `phase 2: ${v2.n} volleys of ${v2.min}–${v2.max}` +
+            (v1.merged + v2.merged ? `, ${v1.merged + v2.merged} sample(s) dropped as merged volleys` : ''));
+  if (v2.max > 0) await shot(ctx, 'phase2-barrage');
   ctx.check('the boss bar tracks the fight and flips to enraged',
             s.bossWrap === 'block' && s.enraged, `bar=${s.bossWrap}, enraged=${s.enraged}`);
   ctx.check('the artillery fight stays inside the point-light budget',
