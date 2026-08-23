@@ -205,29 +205,67 @@ export default async function boss(ctx) {
   // ------------------------------------------------------------------ the boss owns its shells
   // Kill it mid-barrage. Left behind, those fuses freeze under the upgrade screen and
   // detonate on the player in the NEXT wave, fired by a boss that no longer exists.
-  await ctx.waitFor(`window.__probe.live.mortarMarks.length > 0`,
-                    { timeout: 30_000, poll: 60, label: 'a live barrage to kill the boss under',
-                      onPoll: () => ctx.eval(`window.__probe.player.hp = window.__probe.player.maxHp; return true;`) });
-  const before = (await status()).marks;
-  await ctx.eval(`const p = window.__probe;
-    p.fn.damageEnemy(p.enemies.find(e => e.type === 'boss'), 1e9); return true;`);
+  //
+  // Sample and kill in ONE eval, retried until it catches a volley (item 90). Read the
+  // count in a separate round trip and this leg is racing the fuse rather than testing
+  // the game: at turbo 6 the 1.1 s telegraph is only ~180 ms of wall clock, so a poll can
+  // legitimately see a volley with 4 ms of fuse left — measured, on the run that named
+  // this flake — and the next round trip costs more than that. Then `before` reads 0, and
+  // the check goes red on a commit that changed nothing.
+  //
+  // Doing both in one JavaScript turn also asserts something STRONGER than the version it
+  // replaces. `killEnemy` calls `clearMortarMarks` synchronously, so the barrage must be
+  // gone in the same turn as the kill; the old shape passed just as happily when the
+  // fuses had simply burned out on their own in the gap.
+  let kill = null;
+  for (let i = 0; i < 200 && !kill; i++) {
+    kill = JSON.parse(await ctx.eval(`const p = window.__probe;
+      const b = p.enemies.find(e => e.type === 'boss');
+      const before = p.live.mortarMarks.length;
+      if (!b || !before) return JSON.stringify({ before, boss: !!b });
+      p.fn.damageEnemy(b, 1e9);
+      return JSON.stringify({ before, boss: true, after: p.live.mortarMarks.length,
+                              pooled: p.pools.mortarMarkPool.length });`));
+    if (kill.boss && kill.before > 0) break;      // killed under a live barrage — assert on it
+    if (!kill.boss) break;                        // nothing left to kill; the check below says so
+    kill = null;
+    await tickAlive();                            // keep the dummy alive so the boss keeps firing
+    await sleep(30);
+  }
+  // Never catching a volley is a failure, not a pass — the same rule `chaos` follows for
+  // a hostile moment it never reached.
+  ctx.check('killing the boss takes its live barrage with it',
+            !!kill && kill.boss && kill.before > 0 && kill.after === 0,
+            kill && kill.boss ? `${kill.before} marks in the air → ${kill.after}, ${kill.pooled} pooled`
+                              : 'no live barrage was ever caught to kill the boss under');
   s = await status();
-  ctx.check('killing the boss takes its live barrage with it', before > 0 && s.marks === 0,
-            `${before} marks in the air → ${s.marks}, ${s.markPool} pooled`);
   ctx.check('the boss bar clears when the boss dies', !s.boss, s.bossWrap);
 
   // ------------------------------------------------------------------ restart is clean
-  await ctx.waitFor(`window.__probe.live.mortarMarks.length > 0`,
-                    { timeout: 40_000, poll: 60, label: 'a second barrage to restart under',
-                      onPoll: async () => {
-                        const t = await tickAlive();
-                        if (!t.boss || !t.running) await enterWave(10);
-                      } });
-  const poolBefore = (await status()).markPool;
-  await ctx.eval('window.__probe.fn.resetGame(); return true;');
-  s = await status();
+  //
+  // Same atomic shape, and the same race: read the pool in its own round trip and a volley
+  // that expires in the gap is freed into the pool BEFORE the baseline is taken, so a
+  // perfectly intact reset grows nothing and the check reads it as a leak. Restarting in
+  // the same turn as the read also lets the assertion be exact — every live mark returned,
+  // none dropped and none pushed twice — where `>` only said the pool moved.
+  let rst = null;
+  for (let i = 0; i < 300 && !rst; i++) {
+    rst = JSON.parse(await ctx.eval(`const p = window.__probe;
+      const live = p.live.mortarMarks.length, pool = p.pools.mortarMarkPool.length;
+      if (!live) return JSON.stringify({ live });
+      p.fn.resetGame();
+      return JSON.stringify({ live, pool, after: p.live.mortarMarks.length,
+                              poolAfter: p.pools.mortarMarkPool.length });`));
+    if (rst.live > 0) break;
+    rst = null;
+    const t = await tickAlive();               // the boss this leg needs was just killed
+    if (!t.boss || !t.running) await enterWave(10);
+    await sleep(30);
+  }
   ctx.check('a restart mid-barrage returns every mark to the pool',
-            s.marks === 0 && s.markPool > poolBefore, `live ${s.marks}, pool ${poolBefore} → ${s.markPool}`);
+            !!rst && rst.after === 0 && rst.poolAfter === rst.pool + rst.live,
+            rst ? `live ${rst.live} → ${rst.after}, pool ${rst.pool} → ${rst.poolAfter}`
+                : 'no live barrage was ever caught to restart under');
 
   // ------------------------------------------------------------------ wave 5 unchanged
   s = await enterWave(5);
