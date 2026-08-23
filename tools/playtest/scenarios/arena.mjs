@@ -84,7 +84,22 @@ const slots = a => a.sig.split('|');            // one 'x,z,hw,hd,h' record per 
 // three "moved" checks through here — measured on the pre-87 build, `the floor changes
 // every wave` and `the rotation ... wraps re-oriented` both reported a moved floor for a
 // pair the sort collapses, and the boss-floor check reported five distinct floors for one.
+// (The wrap check has since moved on to `foot` below, which is these same sorted records
+// minus the height, so the sort argument still covers it.)
 const pic = a => slots(a).sort().join('|');
+// Item 97 — the same picture with the HEIGHT dropped, so what is left is the FOOTPRINT.
+// Three comparators now, and the rule for choosing between them is which writer you mean
+// to police: `sig` is every slot in obstacle order (use it for "the floor is UNCHANGED",
+// where slot order is signal); `pic` is the floor as the player sees it, written by SYM
+// and by `prof` together; `foot` is the half SYM writes ALONE. `buildLayout` sets
+// `s.h = prof(bx[3])` — the symmetry never reaches the height — so a `pic` comparison of
+// two waves on different profiles is satisfied by the profile and says nothing whatever
+// about SYM. That is the hole item 96 closed one way (compare waves that share a profile)
+// and this closes the other way (compare the field the profile cannot reach), and the
+// second way is the one the wrap needs: waves 1 and 26 are 25 apart, 25 % 3 = 1, so no
+// wave in the wrap block shares wave 1's MIXED profile and there is nothing to pair it
+// with. Strip the height and the wrap is comparable again, on its own terms.
+const foot = a => slots(a).map(b => b.split(',').slice(0, 4).join(',')).sort().join('|');
 const heights = a => a.sig.split('|').map(b => +b.split(',')[4]);
 const area = a => a.sig.split('|').reduce((t, b) => {
   const f = b.split(',').map(Number); return t + f[2] * 2 * f[3] * 2; }, 0);
@@ -168,9 +183,21 @@ export default async function arena(ctx) {
             `w26=${w[26].name} w27=${w[27].name} w29=${w[29].name}, boss floor=${w[5].name}`);
   // ...so the cycle is five archetypes long and wave 26 is back at the first one — in a
   // different orientation, because SYM has its own period of 8.
+  // Item 97 — the re-orientation half compares FOOTPRINTS, never pictures. w1 is MIXED and
+  // w26 is LOW (they are 25 waves apart and HPROF has period 3), so `pic(w[26]) !== pic(w[1])`
+  // was true on the heights alone: the check stayed green with SYM replaced by eight
+  // identities, while its name promised the opposite. Same defect item 96 fixed two blocks
+  // up, and it could not be fixed the same way — the wrap block's plain waves are 26, 27
+  // and 29, and none of them is MIXED, so there is no profile-sharing partner for wave 1.
+  // Dropping the height instead leaves exactly what SYM writes, and keeps the check about
+  // the WRAP rather than turning it into a third copy of the check above. As there, the
+  // pair must also hold `breathe` constant — both are SCATTER, which does not breathe, and
+  // the WAVE1 literal at the top of this file is what fails if a later edit marks it so.
+  // Coverage note: this pair is SYM[0] against SYM[1], 2 of the 8; item 96's two pairs
+  // carry the others, so this is not a full sweep of the symmetry group on its own.
   ctx.check('arena: the rotation is five archetypes long and wraps re-oriented',
-            w[26].name === w[1].name && pic(w[26]) !== pic(w[1]),
-            `w26=${w[26].name} vs w1=${w[1].name}, same picture ${pic(w[26]) === pic(w[1])}`);
+            w[26].name === w[1].name && foot(w[26]) !== foot(w[1]),
+            `w26=${w[26].name} vs w1=${w[1].name}, same footprint ${foot(w[26]) === foot(w[1])}`);
 
   // ---- 2. boss waves own an open floor --------------------------------------
   ctx.check('arena: boss waves fight on an open floor',
