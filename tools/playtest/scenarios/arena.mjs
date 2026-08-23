@@ -80,7 +80,10 @@ const slots = a => a.sig.split('|');            // one 'x,z,hw,hd,h' record per 
 // have different signatures and an identical floor: on the build item 87 fixed, OPEN gave
 // eight different signatures across ten boss waves while being one picture. Any check that
 // wants to say "the floor MOVED" has to compare these; a check that wants "the floor is
-// unchanged" is stricter with the raw sig and should keep using it. See item 94.
+// unchanged" is stricter with the raw sig and should keep using it. Item 94 routed the
+// three "moved" checks through here — measured on the pre-87 build, `the floor changes
+// every wave` and `the rotation ... wraps re-oriented` both reported a moved floor for a
+// pair the sort collapses, and the boss-floor check reported five distinct floors for one.
 const pic = a => slots(a).sort().join('|');
 const heights = a => a.sig.split('|').map(b => +b.split(',')[4]);
 const area = a => a.sig.split('|').reduce((t, b) => {
@@ -106,10 +109,12 @@ export default async function arena(ctx) {
   ctx.check('arena: the floor knows which wave it is for', w[1].wave === 1 && w[1].count === 9,
             `wave=${w[1].wave} count=${w[1].count}`);
 
-  // Re-oriented every wave; a new archetype across every 5-wave boundary.
+  // Re-oriented every wave; a new archetype across every 5-wave boundary. Compared as
+  // PICTURES (item 94): `sig` is joined in obstacle order, so a floor SYM had only
+  // reshuffled into different slots read as changed here and this check said so.
   ctx.check('arena: the floor changes every wave',
-            w[2].sig !== w[1].sig && w[3].sig !== w[2].sig,
-            `1!=2 ${w[2].sig !== w[1].sig}, 2!=3 ${w[3].sig !== w[2].sig}`);
+            pic(w[2]) !== pic(w[1]) && pic(w[3]) !== pic(w[2]),
+            `1!=2 ${pic(w[2]) !== pic(w[1])}, 2!=3 ${pic(w[3]) !== pic(w[2])}`);
   ctx.check('arena: a 5-wave boundary changes the archetype',
             new Set([w[1].name, w[6].name, w[11].name, w[16].name, w[22].name]).size === 5,
             `1=${w[1].name} 6=${w[6].name} 11=${w[11].name} 16=${w[16].name} 22=${w[22].name}`);
@@ -141,8 +146,8 @@ export default async function arena(ctx) {
   // ...so the cycle is five archetypes long and wave 26 is back at the first one — in a
   // different orientation, because SYM has its own period of 8.
   ctx.check('arena: the rotation is five archetypes long and wraps re-oriented',
-            w[26].name === w[1].name && w[26].sig !== w[1].sig,
-            `w26=${w[26].name} vs w1=${w[1].name}, same sig ${w[26].sig === w[1].sig}`);
+            w[26].name === w[1].name && pic(w[26]) !== pic(w[1]),
+            `w26=${w[26].name} vs w1=${w[1].name}, same picture ${pic(w[26]) === pic(w[1])}`);
 
   // ---- 2. boss waves own an open floor --------------------------------------
   ctx.check('arena: boss waves fight on an open floor',
@@ -195,6 +200,10 @@ export default async function arena(ctx) {
   // that fails the day somebody reaches for Math.random() in the layout.
   const again = {};
   for (const n of [2, 6, 11, 16, 22]) { await at(ctx, 13); again[n] = await at(ctx, n); }
+  // Raw `sig`, deliberately, and not `pic` — this is the one shape of comparison item 94
+  // leaves alone. The assertion is that NOTHING drifted, so slot order being part of the
+  // string makes it stricter: a layout that came back with the same boxes in a different
+  // order is still a layout that is not a pure function of n.
   const drifted = Object.keys(again).filter(n => again[n].sig !== w[n].sig);
   ctx.check('arena: the same wave is always the same floor', drifted.length === 0,
             drifted.length ? `drifted: ${drifted.join(',')}` : 'waves 2,6,11,16,22 re-entered');
