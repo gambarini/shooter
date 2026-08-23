@@ -125,6 +125,16 @@ export default async function arena(ctx) {
   // profile, so nothing but the symmetry can separate their pictures. Two pairs on two
   // archetypes, because one pair only exercises two of the eight symmetries: 1/4 is
   // SCATTER under SYM[0] against SYM[3], 6/9 COLONNADE under SYM[5] against SYM[0].
+  //
+  // Both pairs are on NON-`breathe` archetypes, and that is the THIRD thing a pair has to
+  // hold constant rather than a coincidence of which waves were handy. `br` is a function
+  // of n too, so on a breathing archetype w[n] and w[n+3] have different pictures with SYM
+  // as the identity and this check is back to passing on a dead SYM. Mark SCATTER
+  // `breathe` and the WAVE1 literal above catches it; mark COLONNADE `breathe` and nothing
+  // here does, which is the whole reason this paragraph exists. The flip side is why the
+  // pair choice is load-bearing: RING and BASTION breathe precisely BECAUSE all eight
+  // symmetries map them onto themselves, so "re-oriented" cannot be asserted on waves
+  // 11-20 at all — there has to be a non-breathing archetype in every pair.
   ctx.check('arena: the floor is re-oriented, not just re-profiled',
             pic(w[4]) !== pic(w[1]) && pic(w[9]) !== pic(w[6]),
             `1!=4 ${pic(w[4]) !== pic(w[1])}, 6!=9 ${pic(w[9]) !== pic(w[6])}`);
