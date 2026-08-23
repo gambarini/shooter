@@ -272,12 +272,27 @@ export default async function boss(ctx) {
 
   // The shells hit, and the recap says what hit you. `lastHitBy` is exactly the string
   // the death card prints, so this is the killed-by check.
-  await ctx.waitFor(`/BARRAGE/.test(window.__probe.state.lastHitBy || '')`,
-                    { timeout: 30_000, poll: 150, label: 'a mortar to land on the player',
-                      onPoll: () => ctx.eval(`window.__probe.player.hp = window.__probe.player.maxHp; return true;`) });
-  s = await status();
+  //
+  // Observed and asserted in ONE JavaScript turn — item 90's rule, and this leg is the third
+  // place in this file that needed it. `lastHitBy` holds only the LAST hit, and by now the
+  // artillery has deployed most of a mini squad onto a player who is parked and not dodging,
+  // so a chaser's contact damage overwrites the string constantly. The version this replaces
+  // waited for `/BARRAGE/` and then re-read it in a second round trip: at turbo 6 that gap is
+  // ~60 ms of simulated time, which is plenty for a mini to land and rename the recap. It
+  // passed everywhere except a loaded full run, which is the signature of a race and not of
+  // a build. Capturing the damage total in the same turn as the string it belongs to is what
+  // makes the pair meaningful anyway.
+  let hit = null;
+  for (let i = 0; i < 300 && !hit; i++) {
+    const r = JSON.parse(await ctx.eval(`const p = window.__probe;
+      p.player.hp = p.player.maxHp;              // the dummy has to survive the wait
+      return JSON.stringify({ by: p.state.lastHitBy || '',
+                              dmg: Math.round(p.state.stats.dmgTaken) });`));
+    if (/BARRAGE/.test(r.by)) hit = r; else await sleep(100);
+  }
   ctx.check('a mortar impact damages the player and names the ARTILLERY that fired it',
-            s.dmgTaken > 0 && /BARRAGE/.test(s.lastHitBy || ''), `FLATLINED BY: ${s.lastHitBy}`);
+            !!hit && hit.dmg > 0,
+            hit ? `FLATLINED BY: ${hit.by}` : 'no mortar ever named itself in the recap');
 
   // Minis: the 12 s timer, which turbo makes reachable inside a scenario.
   await ctx.waitFor(`window.__probe.enemies.some(e => e.mini)`,
@@ -387,7 +402,15 @@ export default async function boss(ctx) {
             !kill ? 'no live barrage was ever caught to kill the boss under'
                   : !kill.boss ? `no boss left to kill, with ${kill.before} marks in the air`
                   : `${kill.before} marks in the air → ${kill.after}, pool ${kill.poolBefore} → ${kill.pooled}`);
-  s = await status();
+  // The bar is hidden by `update`, so it clears a FRAME after the kill, not in the same turn
+  // as it — and `status()` is a round trip, which on a loaded machine can beat that frame
+  // home. Settle for up to a second before asserting: a bar that never clears still lands as
+  // a red check with its state in the detail, which is the whole point of the leg.
+  for (let i = 0; i < 20; i++) {
+    s = await status();
+    if (!s.boss && s.bossWrap === 'none') break;
+    await sleep(50);
+  }
   // Item 93 — the BAR, which this check is named after and used to print as if that were
   // the same as reading it: the predicate was `!s.boss` alone, so a `#bosswrap` left at
   // `display: block` after the kill passed a check called "the boss bar clears". Its twin
