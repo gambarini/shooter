@@ -241,7 +241,13 @@ export default async function arena(ctx) {
       x: +p.player.pos.x.toFixed(1), z: +p.player.pos.z.toFixed(1) });`));
   ctx.check('arena: no pillar rises through the player', gap.onPlayer === 0,
             `player at ${gap.x},${gap.z} inside ${gap.onPlayer} of ${gap.count} boxes`);
-  ctx.check('arena: no pillar rises through a live pickup', gap.onPickup === 0,
+  // Item 93 — that the pickup found IS the pickup planted, which this check used to claim
+  // by printing both positions and comparing neither. `planted` is the pickup NEAREST the
+  // footprint, so a plant that had been collected in the gap silently retargeted the whole
+  // assertion at some stray metres away, standing on ground no box was ever going to want.
+  // Same guard, and the same reason, as the player leg below it.
+  const heldPickup = Math.hypot(gap.px - b1[0], gap.pz - b1[1]) < 1;
+  ctx.check('arena: no pillar rises through a live pickup', heldPickup && gap.onPickup === 0,
             `planted at ${b1[0]},${b1[1]}, found at ${gap.px},${gap.pz} — ` +
             `${gap.pickups} pickup(s) live, ${gap.onPickup} buried`);
   // ...and the player stayed where they were parked. If the sinking wave-8 floor had

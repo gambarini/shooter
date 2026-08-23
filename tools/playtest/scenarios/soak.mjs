@@ -44,6 +44,12 @@ export default async function soak(ctx) {
       p.player.invuln = 0; p.fn.damagePlayer(1e9, null, 'THE HARNESS'); return true;`);
     await ctx.waitFor('window.__probe.state.running === false', { label: 'death screen', timeout: 20_000 });
     await sleep(400);   // let the death card's own transitions settle
+    // Item 93 — hand the caller something to assert on. `waitFor` proves the RUN stopped;
+    // the death CARD being up is a separate fact, and the check downstream used to name it
+    // with a predicate of literal `true`. Same read `chaos` takes at every hostile moment.
+    return ctx.eval(`const p = window.__probe;
+      return { running: p.state.running, choosing: p.state.choosing,
+               over: !document.getElementById('overCard').classList.contains('hidden') };`);
   };
 
   // --- run 1 ------------------------------------------------------------
@@ -56,8 +62,10 @@ export default async function soak(ctx) {
   ctx.check(`run 1 played ${cfg.waves}+ waves`, end1.state.wave >= cfg.waves,
             `wave ${end1.state.wave}, peak ${maxEnemies} enemies / ${maxParticles} particles, ` +
             `${end1.state.stats.kills} kills, ${end1.state.upgrades.length} upgrades taken`);
-  await die();
-  ctx.check('death screen reached', true, `flatlined on wave ${end1.state.wave}`);
+  const dead1 = await die();
+  ctx.check('death screen reached',
+            dead1.over && dead1.running === false && dead1.choosing === false,
+            `overCard=${dead1.over}, flatlined on wave ${end1.state.wave}`);
 
   // --- run 2: the state-leak comparison ---------------------------------
   const snapB = last = await ctx.eval(`document.getElementById('againBtn').click(); ${SNAPSHOT}`);

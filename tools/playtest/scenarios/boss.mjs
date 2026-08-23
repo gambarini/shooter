@@ -381,7 +381,13 @@ export default async function boss(ctx) {
                   : !kill.boss ? `no boss left to kill, with ${kill.before} marks in the air`
                   : `${kill.before} marks in the air → ${kill.after}, pool ${kill.poolBefore} → ${kill.pooled}`);
   s = await status();
-  ctx.check('the boss bar clears when the boss dies', !s.boss, s.bossWrap);
+  // Item 93 — the BAR, which this check is named after and used to print as if that were
+  // the same as reading it: the predicate was `!s.boss` alone, so a `#bosswrap` left at
+  // `display: block` after the kill passed a check called "the boss bar clears". Its twin
+  // upstream ('the boss bar tracks the fight and flips to enraged') asserts `block`, and
+  // between them the element is now checked in both of the states it has.
+  ctx.check('the boss bar clears when the boss dies', !s.boss && s.bossWrap === 'none',
+            `boss ${s.boss ? 'still alive' : 'gone'}, bar=${s.bossWrap || '(unset)'}`);
 
   // ------------------------------------------------------------------ restart is clean
   //
