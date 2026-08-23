@@ -91,14 +91,13 @@ const pic = a => slots(a).sort().join('|');
 // Three comparators now, and the rule for choosing between them is which writer you mean
 // to police: `sig` is every slot in obstacle order (use it for "the floor is UNCHANGED",
 // where slot order is signal); `pic` is the floor as the player sees it, written by SYM
-// and by `prof` together; `foot` is the half SYM writes ALONE. `buildLayout` sets
-// `s.h = prof(bx[3])` — the symmetry never reaches the height — so a `pic` comparison of
-// two waves on different profiles is satisfied by the profile and says nothing whatever
-// about SYM. That is the hole item 96 closed one way (compare waves that share a profile)
-// and this closes the other way (compare the field the profile cannot reach), and the
-// second way is the one the wrap needs: waves 1 and 26 are 25 apart, 25 % 3 = 1, so no
-// wave in the wrap block shares wave 1's MIXED profile and there is nothing to pair it
-// with. Strip the height and the wrap is comparable again, on its own terms.
+// and by `prof` together; `foot` is the half SYM writes ALONE — `buildLayout` sets
+// `s.h = prof(bx[3])`, so the symmetry never reaches the height.
+// Which means a `pic` comparison of two waves on different profiles is satisfied by the
+// profile and says nothing whatever about SYM. There are two ways out of that, and a
+// check that asserts re-orientation has to say which one it is using: pair waves that
+// SHARE a profile (item 96, two blocks down), or compare only the fields the profile
+// cannot reach (this, used by the wrap check — see there for why the wrap has no pair).
 const foot = a => slots(a).map(b => b.split(',').slice(0, 4).join(',')).sort().join('|');
 const heights = a => a.sig.split('|').map(b => +b.split(',')[4]);
 const area = a => a.sig.split('|').reduce((t, b) => {
