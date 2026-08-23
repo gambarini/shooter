@@ -1074,9 +1074,16 @@ const SYM = [[1, 0, 0, 1], [0, -1, 1, 0], [-1, 0, 0, -1], [0, 1, -1, 0],
 // Per-wave height profile, cycling low → mixed → tall. Tactical, not cosmetic: WASPs
 // fly over anything they clear (collideWasp), and shooter line-of-sight through
 // segBlocked inverts between a 4-unit floor and a 16-unit one.
-const HPROF = [h => h,                  // MIXED — the archetype's own heights
-               h => 3.5 + h * 0.08,     // LOW   — everything lands at ~4
-               h => 13 + h * 0.25];     // TALL  — everything lands at ~16
+// Item 95 — the three profiles are named functions and the rows below hold the FUNCTION,
+// never its index. `prof: 1` and `layoutProf: 2` used to be raw indices into HPROF, the
+// same hazard item 88 took out of the archetype rows one array over: reorder or insert
+// here and OPEN's boss floor and BULLET HELL's hard cover both silently repoint at some
+// other profile. HPROF itself stays an array because the per-wave cycle is positional —
+// low -> mixed -> tall is an ORDER, and that order is the only thing the index means.
+const MIXED = h => h;                   // the archetype's own heights
+const LOW   = h => 3.5 + h * 0.08;      // everything lands at ~4
+const TALL  = h => 13 + h * 0.25;       // everything lands at ~16
+const HPROF = [MIXED, LOW, TALL];
 
 // Six archetypes, each holding roughly today's ~338 u² of footprint. The totals are
 // written down so a later edit cannot silently drift the cover budget; OPEN is the
@@ -1109,7 +1116,7 @@ const ARCHETYPES = [
   // maps the set onto itself, so all eight orientations are distinct floors and the boss
   // cycle is 40 waves long. Footprint is untouched (a slab that slides is the same slab):
   // still 200 u², still the sanctioned exception, still nowhere to hide in the middle.
-  { name: 'OPEN',      /* 200 u² — the exception */ prof: 1, bossOnly: true, boxes: [
+  { name: 'OPEN',      /* 200 u² — the exception */ prof: LOW, bossOnly: true, boxes: [
     [-24, -46, 10, 4, 5], [46, -12, 5, 4, 10], [12, 46, 10, 4, 5], [-46, 24, 5, 4, 10]] },
 ];
 
@@ -1158,18 +1165,17 @@ const smooth = k => k * k * (3 - 2 * k);
 
 function buildLayout(n, mut) {
   let ai = ROTATION[Math.floor((n - 1) / 5) % ROTATION.length];
-  let pi = (n - 1) % HPROF.length;
+  let prof = HPROF[(n - 1) % HPROF.length];
   // Boss and mutator waves own the floor outright, the way computeMood already lets a
   // mutator own the lights and fog. It reverts for free: the next wave's layout is a
   // fresh function of n, so clearMutator has nothing to undo.
   if (n % 5 === 0) ai = OPEN_I;                               // boss → OPEN
   else if (mut && mut.layout !== undefined) {
     ai = mut.layout;
-    if (mut.layoutProf !== undefined) pi = mut.layoutProf;
+    if (mut.layoutProf !== undefined) prof = mut.layoutProf;
   }
   const A = ARCHETYPES[ai];
-  if (A.prof !== undefined) pi = A.prof;
-  const prof = HPROF[pi];
+  if (A.prof !== undefined) prof = A.prof;
   const S = SYM[(n - 1) % 8];
   const a = S[0], b = S[1], c = S[2], d = S[3];
   // RING and BASTION are invariant under all eight symmetries, so they get a radius
@@ -2661,12 +2667,12 @@ const MUTATORS = [
   // way it already owns the lights and fog, and gives it back for free — the next wave's
   // layout is recomputed from n regardless. Item 88 — named through archetypeIndex rather
   // than written as the raw index it resolves to, so a seventh archetype can be added
-  // anywhere in ARCHETYPES without moving anybody's floor. `layoutProf` still indexes
-  // HPROF directly; that array is three entries whose names are in the comment beside it.
+  // anywhere in ARCHETYPES without moving anybody's floor. Item 95 — `layoutProf` is now
+  // the height profile itself (`TALL`), not an index into HPROF, for the same reason.
   { name: 'SWARM',       color: '#ff8f3a', desc: 'ALL CHASERS · 2× SPAWNS · 1.5× SCORE',
     countMul: 2,   hpMul: 0.6, scoreMul: 1.5, forceType: 'chaser', layout: archetypeIndex('WARREN') },
   { name: 'BULLET HELL', color: '#b04bff', desc: 'SHOOTERS ONLY · RAPID FIRE · 1.5× SCORE',
-    scoreMul: 1.5, forceType: 'shooter', fireCDMul: 0.5, layout: archetypeIndex('COLONNADE'), layoutProf: 2 },
+    scoreMul: 1.5, forceType: 'shooter', fireCDMul: 0.5, layout: archetypeIndex('COLONNADE'), layoutProf: TALL },
   { name: 'BERSERK',     color: '#ff2020', desc: 'FAST ENEMIES · 1.5× DAMAGE · 2× SCORE',
     scoreMul: 2,   speedMul: 1.5, dmgMul: 1.5, layout: archetypeIndex('RING') },
   { name: 'FRENZY',      color: '#00f0ff', desc: 'INFINITE AMMO · 1.5× SPAWNS',
