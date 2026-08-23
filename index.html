@@ -1272,6 +1272,37 @@ function updateReconfigure(dt) {
 }
 snapLayout(1, null);   // the title screen's arena is wave 1's, like every first run
 
+// --- the contract for props that follow the layout (item 86) ------------------
+// Items 19 (laser sweep) and 20 (exploding barrels) both want to be placed relative to
+// cover, and item 82 already built everything they need. Written down here, once, so the
+// two of them do not each invent a different answer:
+//
+//   • `obstacles` is the live truth, and it is REBUILT IN PLACE every wave. A prop that
+//     wants to sit beside cover reads it at placement time and never caches a position —
+//     a barrel remembered from wave 6 is floating in the open on wave 7. The records
+//     themselves are stable (`pillars[i].rec`, reused forever), so holding a reference to
+//     one is fine; holding the x/z it had is not.
+//   • `footprintBlocked(i)` is the "is this ground free?" test, and it is the ONE of
+//     them. It already knows about the player and live pickups; a barrel is a third
+//     thing a rising box must not appear inside, so it becomes a third case in that
+//     function rather than a parallel check somewhere else. A prop the guard cannot see
+//     gets a pillar through it, and collideArena's push-out will not save a barrel.
+//   • A laser sweep wants the OPPOSITE of cover — the lanes between boxes. Those are a
+//     property of the archetype, not of the arena in general: COLONNADE and RING have
+//     obvious lanes, WARREN has almost none, OPEN is nothing but lane. So a sweep path
+//     keys off `layoutName` (exposed as `__probe.arena.name`), not off a scan of
+//     `obstacles`.
+//   • The placement window is the END of the rise, for the same reason the layout is
+//     realized there: `updateReconfigure`'s `if (done)` above, once the boxes are up and
+//     `obstacles` is final. It is not the only entrance — `snapLayout` is the no-gap path
+//     (boot, `resetGame`, and `startWave`'s safety net), so anything hung off the rise
+//     needs the same call there or a run entered without a gap comes up with no props at
+//     all. Two callers, and both are in this section.
+//
+// The budget rules are unchanged and apply to props too: no `PointLight` on anything that
+// scales with the wave, pool anything spawned per-frame, and a shared geometry goes in
+// `__probe.gpuShared`.
+
 // ===========================================================================
 // Living environment (item 31) — the arena idles alive even when you stand still.
 //   • Dust: ONE additive Points cloud drifting through the arena volume (1 draw
