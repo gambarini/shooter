@@ -1134,6 +1134,21 @@ const ARCHETYPES = [
 const ROTATION = ARCHETYPES.map((a, i) => a.bossOnly ? -1 : i).filter(i => i >= 0);
 const OPEN_I = ARCHETYPES.findIndex(a => a.bossOnly);
 
+// Item 88 — a mutator names the floor it is fought on, and this is what turns that name
+// into the index buildLayout wants, once, at module load. The MUTATORS rows used to carry
+// the raw integer (`layout: 4` for SWARM), so inserting or reordering an archetype
+// silently repointed every mutator's floor to a different one and nothing in the game
+// complained: only the arena scenario's pairing checks would have noticed, and only
+// because those hardcode the pairings by name. Same shape as OPEN_I above — a marker or a
+// name resolved beside the array, never an index a reader has to count out. It throws
+// rather than returning -1 on purpose: a typo should be a boot failure the playtest's
+// first check catches, not a wave-7 arena that quietly comes up as SCATTER.
+const archetypeIndex = name => {
+  const i = ARCHETYPES.findIndex(a => a.name === name);
+  if (i < 0) throw new Error('unknown archetype: ' + name);
+  return i;
+};
+
 // The realized layout: fixed slot objects written in place, never reallocated.
 const layoutSlots = Array.from({ length: LAYOUT_MAX }, () => ({ x: 0, z: 0, w: 0, h: 0, d: 0 }));
 const slotOn = new Uint8Array(LAYOUT_MAX);
@@ -2642,17 +2657,20 @@ const state = { running: false, paused: false, choosing: false, rerolled: false,
 // reverted the moment the wave clears (and on gameOver/resetGame — never leaks).
 // Boss waves (multiples of 5) win the collision: wave 35 etc. gets no mutator.
 const MUTATORS = [
-  // `layout` / `layoutProf` (item 82) index ARCHETYPES / HPROF: a mutator owns the floor
-  // it is fought on the same way it already owns the lights and fog, and gives it back
-  // for free — the next wave's layout is recomputed from n regardless.
+  // `layout` (item 82) picks the floor the mutator is fought on: it owns the arena the same
+  // way it already owns the lights and fog, and gives it back for free — the next wave's
+  // layout is recomputed from n regardless. Item 88 — named through archetypeIndex rather
+  // than written as the raw index it resolves to, so a seventh archetype can be added
+  // anywhere in ARCHETYPES without moving anybody's floor. `layoutProf` still indexes
+  // HPROF directly; that array is three entries whose names are in the comment beside it.
   { name: 'SWARM',       color: '#ff8f3a', desc: 'ALL CHASERS · 2× SPAWNS · 1.5× SCORE',
-    countMul: 2,   hpMul: 0.6, scoreMul: 1.5, forceType: 'chaser', layout: 4 },
+    countMul: 2,   hpMul: 0.6, scoreMul: 1.5, forceType: 'chaser', layout: archetypeIndex('WARREN') },
   { name: 'BULLET HELL', color: '#b04bff', desc: 'SHOOTERS ONLY · RAPID FIRE · 1.5× SCORE',
-    scoreMul: 1.5, forceType: 'shooter', fireCDMul: 0.5, layout: 1, layoutProf: 2 },
+    scoreMul: 1.5, forceType: 'shooter', fireCDMul: 0.5, layout: archetypeIndex('COLONNADE'), layoutProf: 2 },
   { name: 'BERSERK',     color: '#ff2020', desc: 'FAST ENEMIES · 1.5× DAMAGE · 2× SCORE',
-    scoreMul: 2,   speedMul: 1.5, dmgMul: 1.5, layout: 3 },
+    scoreMul: 2,   speedMul: 1.5, dmgMul: 1.5, layout: archetypeIndex('RING') },
   { name: 'FRENZY',      color: '#00f0ff', desc: 'INFINITE AMMO · 1.5× SPAWNS',
-    countMul: 1.5, infiniteAmmo: true, layout: 5 },
+    countMul: 1.5, infiniteAmmo: true, layout: archetypeIndex('OPEN') },
 ];
 function clearMutator() {
   if (!state.mutator) return;
