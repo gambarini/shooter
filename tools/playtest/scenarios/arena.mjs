@@ -97,7 +97,10 @@ export default async function arena(ctx) {
   // 26, 27 and 29 are the plain waves of the block item 84 took back from OPEN: 25 and 30
   // are bosses and 28 always rolls a mutator, so those three are the whole of what the
   // rotation itself decides there.
-  for (const n of [1, 2, 3, 5, 6, 8, 10, 11, 15, 16, 20, 22, 25, 26, 27, 29]) w[n] = await at(ctx, n);
+  // 4 and 9 are here for the re-orientation check (item 96): each shares its archetype
+  // AND its height profile with a wave three earlier, which is what makes the symmetry
+  // the only thing left that can separate them. 8 and 9 are also the pair section 5 uses.
+  for (const n of [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 15, 16, 20, 22, 25, 26, 27, 29]) w[n] = await at(ctx, n);
   ctx.log(`floors: ${Object.entries(w).map(([n, a]) => `w${n}=${a.name}/${a.count}`).join(' ')}`);
 
   // Wave 1 is the floor the game shipped with — unrotated, unprofiled, nine boxes. Same
@@ -112,9 +115,19 @@ export default async function arena(ctx) {
   // Re-oriented every wave; a new archetype across every 5-wave boundary. Compared as
   // PICTURES (item 94): `sig` is joined in obstacle order, so a floor SYM had only
   // reshuffled into different slots read as changed here and this check said so.
-  ctx.check('arena: the floor changes every wave',
-            pic(w[2]) !== pic(w[1]) && pic(w[3]) !== pic(w[2]),
-            `1!=2 ${pic(w[2]) !== pic(w[1])}, 2!=3 ${pic(w[3]) !== pic(w[2])}`);
+  //
+  // Item 96 — and compared across waves THREE apart, never consecutive ones. Consecutive
+  // waves differ in HEIGHT PROFILE before SYM gets a say (HPROF has period 3), so the
+  // old `pic(w[2]) !== pic(w[1]) && pic(w[3]) !== pic(w[2])` stayed green on a build with
+  // SYM replaced by eight copies of the identity: it was a test of "the height profile is
+  // not constant", which the check two blocks down already makes properly. n and n+3
+  // share both the archetype (the rotation only turns on a 5-wave boundary) and the
+  // profile, so nothing but the symmetry can separate their pictures. Two pairs on two
+  // archetypes, because one pair only exercises two of the eight symmetries: 1/4 is
+  // SCATTER under SYM[0] against SYM[3], 6/9 COLONNADE under SYM[5] against SYM[0].
+  ctx.check('arena: the floor is re-oriented, not just re-profiled',
+            pic(w[4]) !== pic(w[1]) && pic(w[9]) !== pic(w[6]),
+            `1!=4 ${pic(w[4]) !== pic(w[1])}, 6!=9 ${pic(w[9]) !== pic(w[6])}`);
   ctx.check('arena: a 5-wave boundary changes the archetype',
             new Set([w[1].name, w[6].name, w[11].name, w[16].name, w[22].name]).size === 5,
             `1=${w[1].name} 6=${w[6].name} 11=${w[11].name} 16=${w[16].name} 22=${w[22].name}`);
@@ -220,7 +233,7 @@ export default async function arena(ctx) {
   // perpendicular symmetries, so most of wave 9's boxes land on ground wave 8 leaves
   // empty — which is what makes it possible to stand on a wave-9 footprint at all.
   // Neither is a boss or a mutator wave, so nothing else moves underneath the check.
-  const nine = await at(ctx, 9), eight = await at(ctx, 8);
+  const nine = w[9], eight = w[8];   // sampled at the top; the layout is pure in n
   const parse = a => a.sig.split('|').map(b => b.split(',').map(Number));   // [x, z, hw, hd, h]
   const old = parse(eight);
   const free = parse(nine).filter(b => !old.some(o =>
